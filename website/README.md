@@ -20,6 +20,43 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## API Endpoints
+
+### Places Search
+Search for places using Google Places API:
+
+```bash
+curl -X POST http://localhost:3000/api/places/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "restaurants",
+    "lat": 37.7749,
+    "lng": -122.4194,
+    "radiusMeters": 5000
+  }'
+```
+
+### Places Details
+Get detailed information about a specific place:
+
+```bash
+curl -X POST http://localhost:3000/api/places/details \
+  -H "Content-Type: application/json" \
+  -d '{"placeId": "ChIJN1t_tDeuEmsRUsoyG83frY4"}'
+```
+
+### Places Export (CSV)
+Export multiple places to CSV format:
+
+```bash
+curl -X POST http://localhost:3000/api/places/export \
+  -H "Content-Type: application/json" \
+  -d '{"placeIds": ["ChIJN1t_tDeuEmsRUsoyG83frY4", "ChIJ..."]}' \
+  --output leads.csv
+```
+
+**Note:** Make sure to set `GOOGLE_PLACES_API_KEY` in your `.env.local` file.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
