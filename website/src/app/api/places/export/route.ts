@@ -1,45 +1,45 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/firebaseAdmin";
 
 /**
  * POST /api/places/export
  * 
- * Input: { "placeIds": string[] }
+ * Input: { "runId": string }
  * 
  * Example curl:
  * curl -X POST http://localhost:3000/api/places/export \
  *   -H "Content-Type: application/json" \
- *   -d '{"placeIds": ["ChIJN1t_tDeuEmsRUsoyG83frY4", "ChIJ..."]}' \
+ *   -d '{"runId": "abc123"}' \
  *   --output leads.csv
  */
 export async function POST(req: Request) {
   try {
-    const { placeIds } = await req.json();
+    const { runId } = await req.json();
 
-    if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
-      return NextResponse.json({ error: "Missing or invalid placeIds array" }, { status: 400 });
+    if (!runId) {
+      return NextResponse.json({ error: "Missing runId" }, { status: 400 });
     }
 
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Missing GOOGLE_PLACES_API_KEY" }, { status: 500 });
+    // Get results from searchRuns/{runId}/results in rank order
+    const resultsSnapshot = await db
+      .collection(`searchRuns/${runId}/results`)
+      .orderBy("rank")
+      .get();
+
+    if (resultsSnapshot.empty) {
+      return NextResponse.json({ error: "No results found for this runId" }, { status: 404 });
     }
 
-    // Fetch details for each place
+    // Get placeIds from results
+    const placeIds = resultsSnapshot.docs.map((doc) => doc.data().placeId);
+
+    // Fetch place documents from Firestore
     const places: any[] = [];
     for (const placeId of placeIds) {
       try {
-        const resp = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-          method: "GET",
-          headers: {
-            "X-Goog-Api-Key": apiKey,
-            "X-Goog-FieldMask":
-              "id,displayName,websiteUri,nationalPhoneNumber,rating,userRatingCount,formattedAddress,location,types",
-          },
-        });
-
-        if (resp.ok) {
-          const data = await resp.json();
-          places.push(data);
+        const placeDoc = await db.doc(`places/${placeId}`).get();
+        if (placeDoc.exists) {
+          places.push(placeDoc.data());
         }
       } catch (e) {
         console.error(`Error fetching place ${placeId}:`, e);
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
     const rows = places.map((place) => {
       const types = Array.isArray(place.types) ? place.types.join("; ") : "";
       return [
-        escapeCsv(place.displayName?.text || ""),
+        escapeCsv(place.displayName || ""),
         escapeCsv(place.nationalPhoneNumber || ""),
         escapeCsv(place.websiteUri || ""),
         escapeCsv(place.rating || ""),
