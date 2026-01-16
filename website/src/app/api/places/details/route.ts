@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/firebaseAdmin";
+import { FieldValue } from "firebase-admin/firestore";
 
 /**
  * POST /api/places/details
@@ -33,6 +35,26 @@ export async function POST(req: Request) {
     });
 
     const text = await resp.text();
+
+    // Update Firestore if the request was successful
+    if (resp.ok) {
+      try {
+        const data = JSON.parse(text);
+        await db.doc(`places/${placeId}`).set(
+          {
+            websiteUri: data.websiteUri || null,
+            nationalPhoneNumber: data.nationalPhoneNumber || null,
+            businessStatus: data.businessStatus || null,
+            detailsUpdatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error("Error updating Firestore:", e);
+        // Continue to return the response even if Firestore update fails
+      }
+    }
+
     return new NextResponse(text, {
       status: resp.status,
       headers: { "Content-Type": "application/json" },
