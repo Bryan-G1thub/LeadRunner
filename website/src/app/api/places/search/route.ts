@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/firebaseAdmin";
+import { FieldValue } from "firebase-admin/firestore";
 
 export async function POST(req: Request) {
   try {
@@ -28,10 +30,61 @@ export async function POST(req: Request) {
       }),
     });
 
-    const text = await resp.text(); // <— key change
-    return new NextResponse(text, {
-      status: resp.status,
-      headers: { "Content-Type": "application/json" },
+    if (!resp.ok) {
+      const text = await resp.text();
+      return new NextResponse(text, {
+        status: resp.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await resp.json();
+    const places = data.places || [];
+
+    // Generate random runId
+    const runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+    // Create search run document
+    await db.doc(`searchRuns/${runId}`).set({
+      query,
+      lat,
+      lng,
+      radiusMeters,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // Process each place
+    for (let i = 0; i < places.length; i++) {
+      const place = places[i];
+      const placeId = place.id;
+
+      // Upsert place document
+      await db.doc(`places/${placeId}`).set(
+        {
+          id: placeId,
+          displayName: place.displayName?.text || "",
+          formattedAddress: place.formattedAddress || "",
+          location: place.location || null,
+          types: place.types || [],
+          rating: place.rating || null,
+          userRatingCount: place.userRatingCount || null,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Create result document
+      await db.doc(`searchRuns/${runId}/results/${placeId}`).set({
+        placeId,
+        rank: i + 1,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    return NextResponse.json({
+      runId,
+      count: places.length,
+      places,
     });
   } catch (e: any) {
     console.error("places search error:", e);
