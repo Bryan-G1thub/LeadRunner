@@ -10,8 +10,10 @@ import { FieldValue } from "firebase-admin/firestore";
  * Fetches details for all places in a search run and updates Firestore.
  */
 export async function POST(req: Request) {
+  let runId: string | undefined;
   try {
-    const { runId } = await req.json();
+    const body = await req.json();
+    runId = body.runId;
 
     if (!runId) {
       return NextResponse.json({ error: "Missing runId" }, { status: 400 });
@@ -22,6 +24,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing GOOGLE_PLACES_API_KEY" }, { status: 500 });
     }
 
+    // Set status to ENRICHING at start
+    await db.doc(`searchRuns/${runId}`).update({
+      status: "ENRICHING",
+    });
+
     // Read results from searchRuns/{runId}/results ordered by rank
     const resultsSnapshot = await db
       .collection(`searchRuns/${runId}/results`)
@@ -29,6 +36,10 @@ export async function POST(req: Request) {
       .get();
 
     if (resultsSnapshot.empty) {
+      await db.doc(`searchRuns/${runId}`).update({
+        status: "ERROR",
+        errorMessage: "No results found for this runId",
+      });
       return NextResponse.json({ error: "No results found for this runId" }, { status: 404 });
     }
 
@@ -83,6 +94,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // Update status to ENRICHED after processing
+    await db.doc(`searchRuns/${runId}`).update({
+      status: "ENRICHED",
+      enrichUpdatedCount: updatedCount,
+      enrichFailedCount: failedCount,
+      enrichFinishedAt: FieldValue.serverTimestamp(),
+    });
+
     return NextResponse.json({
       ok: true,
       runId,
@@ -92,7 +111,21 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.error("places details-batch error:", e);
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+    const errorMessage = String(e?.message || e);
+    
+    // Set status to ERROR on fatal error
+    if (runId) {
+      try {
+        await db.doc(`searchRuns/${runId}`).update({
+          status: "ERROR",
+          errorMessage,
+        });
+      } catch (updateError) {
+        console.error("Error updating Firestore with error status:", updateError);
+      }
+    }
+    
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
