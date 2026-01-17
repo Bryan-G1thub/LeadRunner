@@ -3,18 +3,132 @@
 import { useState } from "react";
 
 export default function Home() {
-  const [query, setQuery] = useState("landscaper");
-  const [lat, setLat] = useState("40.6782");
-  const [lng, setLng] = useState("-73.9442");
-  const [radiusMeters, setRadiusMeters] = useState("3000");
+  const [query, setQuery] = useState("");
+  const [zipOrCity, setZipOrCity] = useState("");
+  const [formattedAddress, setFormattedAddress] = useState<string | null>(null);
+  const [radiusMeters, setRadiusMeters] = useState("");
   const [runId, setRunId] = useState<string | null>(null);
   const [searchedCount, setSearchedCount] = useState<number | null>(null);
   const [updatedCount, setUpdatedCount] = useState<number | null>(null);
   const [failedCount, setFailedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [zipOrCityError, setZipOrCityError] = useState<string | null>(null);
+  const [radiusError, setRadiusError] = useState<string | null>(null);
+
+  // Validation helpers
+  const validateQuery = (value: string): string | null => {
+    if (!value.trim()) {
+      return "Query is required";
+    }
+    if (!/^[a-zA-Z0-9\s\-']+$/.test(value)) {
+      return "Only alphanumeric characters, spaces, hyphens, and apostrophes allowed";
+    }
+    if (value.trim().length < 2) {
+      return "Query must be at least 2 characters";
+    }
+    if (value.trim().length > 100) {
+      return "Query must be 100 characters or less";
+    }
+    return null;
+  };
+
+  const validateZipOrCity = (value: string): string | null => {
+    if (!value.trim()) {
+      return "Zip code or city is required";
+    }
+    if (!/^[a-zA-Z0-9\s,\-\.]+$/.test(value)) {
+      return "Only alphanumeric characters, spaces, commas, hyphens, and periods allowed";
+    }
+    if (value.trim().length < 2) {
+      return "Must be at least 2 characters";
+    }
+    if (value.trim().length > 100) {
+      return "Must be 100 characters or less";
+    }
+    return null;
+  };
+
+  const validateRadius = (value: string): string | null => {
+    if (!value.trim()) {
+      return "Radius is required";
+    }
+    const num = parseInt(value);
+    if (isNaN(num)) {
+      return "Must be a valid number";
+    }
+    if (num < 100 || num > 50000) {
+      return "Radius must be between 100 and 50000 meters";
+    }
+    return null;
+  };
+
+  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value);
+    setError(null);
+  };
+
+  const handleZipOrCityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setZipOrCity(e.target.value);
+    setFormattedAddress(null);
+    setError(null);
+  };
+
+  const handleRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRadiusMeters(e.target.value);
+    setError(null);
+  };
+
+  const geocodeLocation = async (): Promise<{ lat: number; lng: number } | null> => {
+    const zipErr = validateZipOrCity(zipOrCity);
+    if (zipErr) {
+      setZipOrCityError(zipErr);
+      setError("Please enter a valid zip code or city name");
+      return null;
+    }
+
+    setGeocoding(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/geocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zipOrCity: zipOrCity.trim() }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Geocoding failed");
+      }
+
+      const data = await response.json();
+      setFormattedAddress(data.formattedAddress);
+      return { lat: data.lat, lng: data.lng };
+    } catch (e: any) {
+      setError(e.message || "Geocoding failed");
+      return null;
+    } finally {
+      setGeocoding(false);
+    }
+  };
 
   const handleRunSearch = async () => {
+    const queryErr = validateQuery(query);
+    const zipErr = validateZipOrCity(zipOrCity);
+    const radiusErr = validateRadius(radiusMeters);
+
+    setQueryError(queryErr);
+    setZipOrCityError(zipErr);
+    setRadiusError(radiusErr);
+
+    if (queryErr || zipErr || radiusErr) {
+      setError("Please fix the errors above");
+      return;
+    }
+
     setError(null);
     setLoading(true);
     setRunId(null);
@@ -23,13 +137,21 @@ export default function Home() {
     setFailedCount(null);
 
     try {
+      // First geocode the location
+      const location = await geocodeLocation();
+      if (!location) {
+        setLoading(false);
+        return;
+      }
+
+      // Then run search and enrich
       const response = await fetch("/api/runs/create-and-enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query,
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
+          query: query.trim(),
+          lat: location.lat,
+          lng: location.lng,
           radiusMeters: parseInt(radiusMeters),
         }),
       });
@@ -97,33 +219,39 @@ export default function Home() {
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="landscaper"
+              onChange={handleQueryChange}
+              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                queryError ? "border-red-500" : "border-gray-300"
+              }`}
+              placeholder="e.g., landscaper"
+              maxLength={100}
             />
+            {queryError && (
+              <p className="text-xs text-red-600 mt-1">{queryError}</p>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
-              <input
-                type="number"
-                value={lat}
-                onChange={(e) => setLat(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="40.6782"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
-              <input
-                type="number"
-                value={lng}
-                onChange={(e) => setLng(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="-73.9442"
-              />
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Zip Code or City</label>
+            <input
+              type="text"
+              value={zipOrCity}
+              onChange={handleZipOrCityChange}
+              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                zipOrCityError ? "border-red-500" : "border-gray-300"
+              }`}
+              placeholder="e.g., 11201 or Brooklyn, NY"
+              maxLength={100}
+            />
+            {zipOrCityError && (
+              <p className="text-xs text-red-600 mt-1">{zipOrCityError}</p>
+            )}
+            {formattedAddress && !zipOrCityError && (
+              <p className="text-xs text-gray-600 mt-1 italic">{formattedAddress}</p>
+            )}
+            {geocoding && !zipOrCityError && (
+              <p className="text-xs text-blue-600 mt-1">Geocoding...</p>
+            )}
           </div>
 
           <div>
@@ -131,10 +259,17 @@ export default function Home() {
             <input
               type="number"
               value={radiusMeters}
-              onChange={(e) => setRadiusMeters(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="3000"
+              onChange={handleRadiusChange}
+              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                radiusError ? "border-red-500" : "border-gray-300"
+              }`}
+              placeholder="e.g., 3000"
+              min={100}
+              max={50000}
             />
+            {radiusError && (
+              <p className="text-xs text-red-600 mt-1">{radiusError}</p>
+            )}
           </div>
         </div>
 
@@ -168,10 +303,10 @@ export default function Home() {
         <div className="flex gap-4">
           <button
             onClick={handleRunSearch}
-            disabled={loading}
+            disabled={loading || geocoding}
             className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
           >
-            {loading ? "Running…" : "Run Search + Enrich"}
+            {geocoding ? "Geocoding…" : loading ? "Running…" : "Run Search + Enrich"}
           </button>
           <button
             onClick={handleExport}
