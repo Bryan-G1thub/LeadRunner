@@ -14,6 +14,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
+  const [runCompleted, setRunCompleted] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [zipOrCityError, setZipOrCityError] = useState<string | null>(null);
   const [radiusError, setRadiusError] = useState<string | null>(null);
@@ -68,17 +70,20 @@ export default function Home() {
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);
     setError(null);
+    setRunCompleted(false);
   };
 
   const handleZipOrCityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setZipOrCity(e.target.value);
     setFormattedAddress(null);
     setError(null);
+    setRunCompleted(false);
   };
 
   const handleRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setRadiusMeters(e.target.value);
     setError(null);
+    setRunCompleted(false);
   };
 
   const geocodeLocation = async (): Promise<{ lat: number; lng: number } | null> => {
@@ -91,6 +96,7 @@ export default function Home() {
 
     setGeocoding(true);
     setError(null);
+    setStatusMessage("Geocoding…");
 
     try {
       const response = await fetch("/api/geocode", {
@@ -109,6 +115,7 @@ export default function Home() {
       return { lat: data.lat, lng: data.lng };
     } catch (e: any) {
       setError(e.message || "Geocoding failed");
+      setStatusMessage(null);
       return null;
     } finally {
       setGeocoding(false);
@@ -131,6 +138,7 @@ export default function Home() {
 
     setError(null);
     setLoading(true);
+    setRunCompleted(false);
     setRunId(null);
     setSearchedCount(null);
     setUpdatedCount(null);
@@ -141,8 +149,11 @@ export default function Home() {
       const location = await geocodeLocation();
       if (!location) {
         setLoading(false);
+        setStatusMessage(null);
         return;
       }
+
+      setStatusMessage("Running search + enrich…");
 
       // Then run search and enrich
       const response = await fetch("/api/runs/create-and-enrich", {
@@ -166,8 +177,11 @@ export default function Home() {
       setSearchedCount(data.searchedCount);
       setUpdatedCount(data.updatedCount);
       setFailedCount(data.failedCount);
+      setRunCompleted(true);
+      setStatusMessage("Done. You can export CSV.");
     } catch (e: any) {
       setError(e.message || "Search failed");
+      setStatusMessage(null);
     } finally {
       setLoading(false);
     }
@@ -278,23 +292,23 @@ export default function Home() {
         )}
 
         {runId && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-md space-y-2">
-            <div className="text-sm">
-              <span className="font-medium">Run ID:</span> {runId}
+          <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-md space-y-2">
+            <div className="text-sm text-gray-900">
+              <span className="font-bold">Run ID:</span> {runId}
             </div>
             {searchedCount !== null && (
-              <div className="text-sm">
-                <span className="font-medium">Searched:</span> {searchedCount}
+              <div className="text-sm text-gray-900">
+                <span className="font-bold">Searched:</span> {searchedCount}
               </div>
             )}
             {updatedCount !== null && (
-              <div className="text-sm">
-                <span className="font-medium">Updated:</span> {updatedCount}
+              <div className="text-sm text-gray-900">
+                <span className="font-bold">Updated:</span> {updatedCount}
               </div>
             )}
             {failedCount !== null && (
-              <div className="text-sm">
-                <span className="font-medium">Failed:</span> {failedCount}
+              <div className="text-sm text-gray-900">
+                <span className="font-bold">Failed:</span> {failedCount}
               </div>
             )}
           </div>
@@ -303,19 +317,37 @@ export default function Home() {
         <div className="flex gap-4">
           <button
             onClick={handleRunSearch}
-            disabled={loading || geocoding}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+            disabled={loading || geocoding || runCompleted}
+            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
           >
-            {geocoding ? "Geocoding…" : loading ? "Running…" : "Run Search + Enrich"}
+            {loading || geocoding ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Running…
+              </>
+            ) : runCompleted ? (
+              "Completed ✓"
+            ) : (
+              "Run Search + Enrich"
+            )}
           </button>
           <button
             onClick={handleExport}
             disabled={loading || !runId}
-            className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+            className={`flex-1 px-4 py-2 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium ${
+              runCompleted ? "bg-green-700 shadow-md" : "bg-green-600"
+            }`}
           >
             Export CSV
           </button>
         </div>
+
+        {statusMessage && (
+          <div className="mt-3 text-sm text-gray-600 text-center">{statusMessage}</div>
+        )}
       </div>
     </div>
   );

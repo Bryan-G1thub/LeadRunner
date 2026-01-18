@@ -56,9 +56,11 @@ export async function POST(req: Request) {
       return str;
     };
 
-    const headers = ["name", "phone", "website", "rating", "userRatingCount", "formattedAddress", "types"];
+    const headers = ["name", "phone", "website", "rating", "userRatingCount", "formattedAddress", "hasWebsite", "hasPhone", "types"];
     const rows = places.map((place) => {
       const types = Array.isArray(place.types) ? place.types.join("; ") : "";
+      const hasWebsite = !!(place.websiteUri && place.websiteUri.trim());
+      const hasPhone = !!(place.nationalPhoneNumber && place.nationalPhoneNumber.trim());
       return [
         escapeCsv(place.displayName || ""),
         escapeCsv(place.nationalPhoneNumber || ""),
@@ -66,6 +68,8 @@ export async function POST(req: Request) {
         escapeCsv(place.rating || ""),
         escapeCsv(place.userRatingCount || ""),
         escapeCsv(place.formattedAddress || ""),
+        escapeCsv(hasWebsite ? "Yes" : "No"),
+        escapeCsv(hasPhone ? "Yes" : "No"),
         escapeCsv(types),
       ];
     });

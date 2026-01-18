@@ -5,14 +5,15 @@ import { FieldValue } from "firebase-admin/firestore";
 /**
  * POST /api/runs/create-and-enrich
  * 
- * Input: { query: string, lat: number, lng: number, radiusMeters: number }
+ * Input: { query: string, lat: number, lng: number, radiusMeters: number, maxEnrich?: number }
  * 
  * Performs search and enrichment in one call.
+ * maxEnrich defaults to 25 to cap enrichment costs.
  */
 export async function POST(req: Request) {
   let runId: string | undefined;
   try {
-    const { query, lat, lng, radiusMeters } = await req.json();
+    const { query, lat, lng, radiusMeters, maxEnrich = 25 } = await req.json();
 
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
@@ -94,6 +95,9 @@ export async function POST(req: Request) {
     const searchedCount = places.length;
     const placeIds = places.map((p: any) => p.id);
 
+    // Only enrich top N results (cost guardrail)
+    const placeIdsToEnrich = placeIds.slice(0, maxEnrich);
+
     // Immediately perform enrichment
     let updatedCount = 0;
     let failedCount = 0;
@@ -101,8 +105,8 @@ export async function POST(req: Request) {
 
     // Process with concurrency limit of 3
     const concurrencyLimit = 3;
-    for (let i = 0; i < placeIds.length; i += concurrencyLimit) {
-      const batch = placeIds.slice(i, i + concurrencyLimit);
+    for (let i = 0; i < placeIdsToEnrich.length; i += concurrencyLimit) {
+      const batch = placeIdsToEnrich.slice(i, i + concurrencyLimit);
 
       await Promise.all(
         batch.map(async (placeId: string) => {
