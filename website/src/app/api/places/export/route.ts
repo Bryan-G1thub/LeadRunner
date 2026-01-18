@@ -20,6 +20,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing runId" }, { status: 400 });
     }
 
+    // Get run document to access query, location, radius for filename
+    const runDoc = await db.doc(`searchRuns/${runId}`).get();
+    if (!runDoc.exists) {
+      return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+
+    const runData = runDoc.data();
+    const query = runData?.query || "";
+    const radiusMeters = runData?.radiusMeters || 0;
+    const lat = runData?.lat || "";
+    const lng = runData?.lng || "";
+
     // Get results from searchRuns/{runId}/results in rank order
     const resultsSnapshot = await db
       .collection(`searchRuns/${runId}/results`)
@@ -56,23 +68,42 @@ export async function POST(req: Request) {
       return str;
     };
 
-    const headers = ["name", "phone", "website", "rating", "userRatingCount", "formattedAddress", "hasWebsite", "hasPhone", "types"];
+    // Helper to create Google Search URL from business name
+    const createGoogleSearchUrl = (name: string): string => {
+      if (!name || !name.trim()) return "";
+      // Normalize: trim, remove non-alphanumeric except spaces, then replace spaces with +
+      const normalized = name
+        .trim()
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .replace(/\s+/g, "+");
+      return `https://www.google.com/search?q=${normalized}`;
+    };
+
+    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "types", "googleSearchUrl"];
     const rows = places.map((place) => {
+      const name = place.name || "";
       const types = Array.isArray(place.types) ? place.types.join("; ") : "";
-      const hasWebsite = !!(place.websiteUri && place.websiteUri.trim());
-      const hasPhone = !!(place.nationalPhoneNumber && place.nationalPhoneNumber.trim());
+      const googleSearchUrl = createGoogleSearchUrl(name);
       return [
-        escapeCsv(place.displayName || ""),
-        escapeCsv(place.nationalPhoneNumber || ""),
-        escapeCsv(place.websiteUri || ""),
+        escapeCsv(name),
         escapeCsv(place.rating || ""),
         escapeCsv(place.userRatingCount || ""),
         escapeCsv(place.formattedAddress || ""),
-        escapeCsv(hasWebsite ? "Yes" : "No"),
-        escapeCsv(hasPhone ? "Yes" : "No"),
         escapeCsv(types),
+        escapeCsv(googleSearchUrl),
       ];
     });
+
+    // Create filename from search context
+    const locationStr = lat && lng ? `${lat}_${lng}` : "location";
+    const sanitizeFilename = (str: string): string => {
+      return str
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9\-]/g, "")
+        .substring(0, 50);
+    };
+    const filename = `${sanitizeFilename(query)}_${sanitizeFilename(locationStr)}_${radiusMeters}m_${runId}.csv`;
 
     const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
 
@@ -80,7 +111,7 @@ export async function POST(req: Request) {
       status: 200,
       headers: {
         "Content-Type": "text/csv",
-        "Content-Disposition": 'attachment; filename="leads.csv"',
+        "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });
   } catch (e: any) {

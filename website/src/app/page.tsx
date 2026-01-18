@@ -9,8 +9,6 @@ export default function Home() {
   const [radiusMeters, setRadiusMeters] = useState("");
   const [runId, setRunId] = useState<string | null>(null);
   const [searchedCount, setSearchedCount] = useState<number | null>(null);
-  const [updatedCount, setUpdatedCount] = useState<number | null>(null);
-  const [failedCount, setFailedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
@@ -141,8 +139,6 @@ export default function Home() {
     setRunCompleted(false);
     setRunId(null);
     setSearchedCount(null);
-    setUpdatedCount(null);
-    setFailedCount(null);
 
     try {
       // First geocode the location
@@ -153,10 +149,10 @@ export default function Home() {
         return;
       }
 
-      setStatusMessage("Running search + enrich…");
+      setStatusMessage("Running search…");
 
-      // Then run search and enrich
-      const response = await fetch("/api/runs/create-and-enrich", {
+      // Run search
+      const response = await fetch("/api/runs/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -175,8 +171,6 @@ export default function Home() {
       const data = await response.json();
       setRunId(data.runId);
       setSearchedCount(data.searchedCount);
-      setUpdatedCount(data.updatedCount);
-      setFailedCount(data.failedCount);
       setRunCompleted(true);
       setStatusMessage("Done. You can export CSV.");
     } catch (e: any) {
@@ -301,16 +295,6 @@ export default function Home() {
                 <span className="font-bold">Searched:</span> {searchedCount}
               </div>
             )}
-            {updatedCount !== null && (
-              <div className="text-sm text-gray-900">
-                <span className="font-bold">Updated:</span> {updatedCount}
-              </div>
-            )}
-            {failedCount !== null && (
-              <div className="text-sm text-gray-900">
-                <span className="font-bold">Failed:</span> {failedCount}
-              </div>
-            )}
           </div>
         )}
 
@@ -331,7 +315,7 @@ export default function Home() {
             ) : runCompleted ? (
               "Completed ✓"
             ) : (
-              "Run Search + Enrich"
+              "Run Search"
             )}
           </button>
           <button
