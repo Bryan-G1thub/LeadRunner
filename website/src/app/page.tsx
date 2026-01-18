@@ -1,8 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Home() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [query, setQuery] = useState("");
   const [zipOrCity, setZipOrCity] = useState("");
   const [formattedAddress, setFormattedAddress] = useState<string | null>(null);
@@ -82,6 +86,49 @@ export default function Home() {
     setRadiusMeters(e.target.value);
     setError(null);
     setRunCompleted(false);
+  };
+
+  // Check authentication on mount
+  useEffect(() => {
+    const isAuthenticated = localStorage.getItem("app_authenticated") === "true";
+    setAuthenticated(isAuthenticated);
+    setCheckingAuth(false);
+  }, []);
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+
+    if (!password.trim()) {
+      setPasswordError("Please enter a password");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/auth/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: password.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.authenticated) {
+        localStorage.setItem("app_authenticated", "true");
+        setAuthenticated(true);
+        setPassword("");
+      } else {
+        // Check for server error (e.g., missing env var)
+        if (data.error) {
+          setPasswordError(data.error);
+        } else {
+          setPasswordError("Incorrect password");
+        }
+        setPassword("");
+      }
+    } catch (e: any) {
+      setPasswordError("Authentication failed");
+    }
   };
 
   const geocodeLocation = async (): Promise<{ lat: number; lng: number } | null> => {
@@ -214,6 +261,46 @@ export default function Home() {
       setLoading(false);
     }
   };
+
+  // Show password screen if not authenticated
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-md p-8 w-full max-w-md">
+          <h1 className="text-2xl font-bold text-gray-900 mb-6 text-center">Enter Password</h1>
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Password"
+                autoFocus
+              />
+              {passwordError && (
+                <p className="text-xs text-red-600 mt-1">{passwordError}</p>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+            >
+              Enter
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
