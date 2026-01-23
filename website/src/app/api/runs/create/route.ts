@@ -53,6 +53,8 @@ export async function POST(req: Request) {
     // Generate random runId
     runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
+    const searchedCount = places.length;
+
     // Create search run document
     await db.doc(`searchRuns/${runId}`).set({
       query,
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
       lng,
       radiusMeters,
       locationName: locationName || null,
+      resultCount: searchedCount,
       createdAt: FieldValue.serverTimestamp(),
     });
 
@@ -89,8 +92,6 @@ export async function POST(req: Request) {
         createdAt: FieldValue.serverTimestamp(),
       });
     }
-
-    const searchedCount = places.length;
 
     return NextResponse.json({
       ok: true,

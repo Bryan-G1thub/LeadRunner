@@ -21,6 +21,8 @@ export default function Home() {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [zipOrCityError, setZipOrCityError] = useState<string | null>(null);
   const [radiusError, setRadiusError] = useState<string | null>(null);
+  const [runs, setRuns] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Validation helpers
   const validateQuery = (value: string): string | null => {
@@ -94,6 +96,60 @@ export default function Home() {
     setAuthenticated(isAuthenticated);
     setCheckingAuth(false);
   }, []);
+
+  // Fetch history when authenticated
+  useEffect(() => {
+    if (authenticated) {
+      fetchRuns();
+    }
+  }, [authenticated]);
+
+  const fetchRuns = async () => {
+    setLoadingHistory(true);
+    try {
+      const response = await fetch("/api/runs/list");
+      if (response.ok) {
+        const data = await response.json();
+        setRuns(data.runs || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch runs:", e);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleDownloadCsv = async (runId: string, filename: string) => {
+    try {
+      const response = await fetch(`/api/runs/csv?runId=${runId}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to download CSV");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert(e.message || "Failed to download CSV");
+    }
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return "Unknown";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString();
+    } catch {
+      return dateString;
+    }
+  };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -221,6 +277,8 @@ export default function Home() {
       setSearchedCount(data.searchedCount);
       setRunCompleted(true);
       setStatusMessage("Done. You can export CSV.");
+      // Refresh history after new search
+      fetchRuns();
     } catch (e: any) {
       setError(e.message || "Search failed");
       setStatusMessage(null);
@@ -266,6 +324,8 @@ export default function Home() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      // Refresh history after export
+      fetchRuns();
     } catch (e: any) {
       setError(e.message || "Export failed");
     } finally {
@@ -314,10 +374,11 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-md p-8 w-full max-w-2xl">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Stonebrook Lead Runner</h1>
-        <p className="text-sm text-gray-600 mb-6">Search → Enrich → Export in one click</p>
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg shadow-md p-8 mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Stonebrook Lead Runner</h1>
+          <p className="text-sm text-gray-600 mb-6">Search → Enrich → Export in one click</p>
 
         <div className="space-y-4 mb-6">
           <div>
@@ -419,9 +480,20 @@ export default function Home() {
           <button
             onClick={handleExport}
             disabled={loading || !runId}
-            className={`flex-1 px-4 py-2 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium ${
-              runCompleted ? "bg-green-700 shadow-md" : "bg-green-600"
-            }`}
+            className="flex-1 px-4 py-2 text-white rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+            style={{
+              backgroundColor: runCompleted ? "#1e3a8a" : "#1e40af",
+            }}
+            onMouseEnter={(e) => {
+              if (!loading && runId) {
+                e.currentTarget.style.backgroundColor = "#1e3a8a";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading && runId) {
+                e.currentTarget.style.backgroundColor = runCompleted ? "#1e3a8a" : "#1e40af";
+              }
+            }}
           >
             Export CSV
           </button>
@@ -430,6 +502,92 @@ export default function Home() {
         {statusMessage && (
           <div className="mt-3 text-sm text-gray-600 text-center">{statusMessage}</div>
         )}
+      </div>
+
+      {/* History Section */}
+      <div className="bg-white rounded-lg shadow-md p-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-4">Recent Searches</h2>
+        
+        {loadingHistory ? (
+          <div className="text-center text-gray-600 py-8">Loading history...</div>
+        ) : runs.length === 0 ? (
+          <div className="text-center text-gray-600 py-8">No search history yet. Run a search above to get started.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Query
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Location
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Radius
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Results
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {runs.map((run) => (
+                  <tr key={run.runId} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                      {formatDate(run.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {run.query || "—"}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "—")}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {run.radiusMeters ? `${run.radiusMeters}m` : "—"}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {run.resultCount || 0}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {run.status === "ERROR" ? (
+                        <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded">
+                          Error
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs font-medium rounded" style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}>
+                          Success
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {run.hasCsv ? (
+                        <button
+                          onClick={() => handleDownloadCsv(run.runId, run.csvFilename || `${run.query || "export"}_${run.radiusMeters}m.csv`)}
+                          className="text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          Download CSV
+                        </button>
+                      ) : (
+                        <span className="text-gray-400">No CSV</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
       </div>
     </div>
   );

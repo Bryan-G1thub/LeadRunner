@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
+import { FieldValue } from "firebase-admin/firestore";
 
 /**
  * POST /api/places/export
@@ -117,6 +118,18 @@ export async function POST(req: Request) {
     const filename = `${queryStr}_${locationStr}_${radiusMeters}m.csv`;
 
     const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+
+    // Store CSV content in Firestore for later retrieval
+    try {
+      await db.doc(`searchRuns/${runId}`).update({
+        csvContent: csv,
+        csvFilename: filename,
+        csvExportedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Error storing CSV in Firestore:", e);
+      // Don't fail the export if storage fails
+    }
 
     return new NextResponse(csv, {
       status: 200,
