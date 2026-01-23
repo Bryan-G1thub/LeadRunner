@@ -5,14 +5,14 @@ import { FieldValue } from "firebase-admin/firestore";
 /**
  * POST /api/runs/create
  * 
- * Input: { query: string, lat: number, lng: number, radiusMeters: number }
+ * Input: { query: string, lat: number, lng: number, radiusMeters: number, locationName?: string }
  * 
  * Performs search and stores results in Firestore.
  */
 export async function POST(req: Request) {
   let runId: string | undefined;
   try {
-    const { query, lat, lng, radiusMeters } = await req.json();
+    const { query, lat, lng, radiusMeters, locationName } = await req.json();
 
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
@@ -59,6 +59,7 @@ export async function POST(req: Request) {
       lat,
       lng,
       radiusMeters,
+      locationName: locationName || null,
       createdAt: FieldValue.serverTimestamp(),
     });
 

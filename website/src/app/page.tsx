@@ -207,6 +207,7 @@ export default function Home() {
           lat: location.lat,
           lng: location.lng,
           radiusMeters: parseInt(radiusMeters),
+          locationName: formattedAddress || zipOrCity.trim(),
         }),
       });
 
@@ -246,11 +247,21 @@ export default function Home() {
         throw new Error(errorData.error || "Export failed");
       }
 
+      // Extract filename from Content-Disposition header
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = "leads.csv"; // fallback
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, "");
+        }
+      }
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "leads.csv";
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

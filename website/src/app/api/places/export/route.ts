@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     const runData = runDoc.data();
     const query = runData?.query || "";
     const radiusMeters = runData?.radiusMeters || 0;
+    const locationName = runData?.locationName || "";
     const lat = runData?.lat || "";
     const lng = runData?.lng || "";
 
@@ -95,15 +96,25 @@ export async function POST(req: Request) {
     });
 
     // Create filename from search context
-    const locationStr = lat && lng ? `${lat}_${lng}` : "location";
     const sanitizeFilename = (str: string): string => {
+      if (!str) return "";
       return str
         .toLowerCase()
         .replace(/\s+/g, "-")
         .replace(/[^a-z0-9\-]/g, "")
         .substring(0, 50);
     };
-    const filename = `${sanitizeFilename(query)}_${sanitizeFilename(locationStr)}_${radiusMeters}m_${runId}.csv`;
+    
+    // Use locationName if available, otherwise fall back to lat_lng
+    let locationStr = "location";
+    if (locationName) {
+      locationStr = sanitizeFilename(locationName);
+    } else if (lat && lng) {
+      locationStr = `${lat}_${lng}`;
+    }
+    
+    const queryStr = sanitizeFilename(query) || "query";
+    const filename = `${queryStr}_${locationStr}_${radiusMeters}m.csv`;
 
     const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
 
