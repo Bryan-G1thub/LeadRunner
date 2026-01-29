@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
+/* Stonebrook-inspired palette: https://stonebrooknyc.com/ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0A1628;
+  --stonebrook-navy: #0A1628;
+  --stonebrook-ocean: #2a6f8f;
+  --stonebrook-cyan: #14a5aa;
+  --stonebrook-white: #FFFFFF;
+  --stonebrook-muted: #64748b;
 }
 
 @theme inline {
@@ -12,15 +18,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }

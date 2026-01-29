@@ -119,12 +119,25 @@ export default function Home() {
     }
   };
 
-  const handleDownloadCsv = async (runId: string, filename: string) => {
+  const handleDownloadCsv = async (runId: string, fallbackFilename: string) => {
     try {
-      const response = await fetch(`/api/runs/csv?runId=${runId}`);
+      const response = await fetch("/api/places/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId }),
+      });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to download CSV");
+      }
+
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = fallbackFilename;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, "");
+        }
       }
 
       const blob = await response.blob();
@@ -136,6 +149,7 @@ export default function Home() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      fetchRuns();
     } catch (e: any) {
       alert(e.message || "Failed to download CSV");
     }
@@ -336,34 +350,35 @@ export default function Home() {
   // Show password screen if not authenticated
   if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="text-gray-600">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0A1628" }}>
+        <div className="text-[#14a5aa] font-medium">Loading...</div>
       </div>
     );
   }
 
   if (!authenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-md p-8 w-full max-w-md">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6 text-center">Enter Password</h1>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: "#0A1628" }}>
+        <div className="bg-white rounded-xl shadow-xl p-8 w-full max-w-md border border-[#2a6f8f]/20">
+          <h1 className="text-2xl font-bold mb-6 text-center" style={{ color: "#0A1628" }}>Enter Password</h1>
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
             <div>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border border-[#2a6f8f]/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent"
                 placeholder="Password"
                 autoFocus
               />
               {passwordError && (
-                <p className="text-xs text-red-600 mt-1">{passwordError}</p>
+                <p className="text-xs text-red-500 mt-1">{passwordError}</p>
               )}
             </div>
             <button
               type="submit"
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium"
+              className="w-full px-4 py-2.5 text-white rounded-lg font-medium transition-colors hover:opacity-90"
+              style={{ backgroundColor: "#2a6f8f" }}
             >
               Enter
             </button>
@@ -374,83 +389,83 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen p-4 md:p-6" style={{ backgroundColor: "#0A1628" }}>
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-8 mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Stonebrook Lead Runner</h1>
-          <p className="text-sm text-gray-600 mb-6">Search → Enrich → Export in one click</p>
+        <div className="bg-white rounded-xl shadow-xl p-8 mb-6 border border-[#2a6f8f]/10">
+          <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: "#0A1628" }}>Stonebrook Lead Runner</h1>
+          <p className="text-sm mb-6" style={{ color: "#64748b" }}>Search → Enrich → Export in one click</p>
 
         <div className="space-y-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Query</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Query</label>
             <input
               type="text"
               value={query}
               onChange={handleQueryChange}
-              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                queryError ? "border-red-500" : "border-gray-300"
+              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent ${
+                queryError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
               placeholder="e.g., landscaper"
               maxLength={100}
             />
             {queryError && (
-              <p className="text-xs text-red-600 mt-1">{queryError}</p>
+              <p className="text-xs text-red-500 mt-1">{queryError}</p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Zip Code or City</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Zip Code or City</label>
             <input
               type="text"
               value={zipOrCity}
               onChange={handleZipOrCityChange}
-              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                zipOrCityError ? "border-red-500" : "border-gray-300"
+              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent ${
+                zipOrCityError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
               placeholder="e.g., 11201 or Brooklyn, NY"
               maxLength={100}
             />
             {zipOrCityError && (
-              <p className="text-xs text-red-600 mt-1">{zipOrCityError}</p>
+              <p className="text-xs text-red-500 mt-1">{zipOrCityError}</p>
             )}
             {formattedAddress && !zipOrCityError && (
-              <p className="text-xs text-gray-600 mt-1 italic">{formattedAddress}</p>
+              <p className="text-xs mt-1 italic" style={{ color: "#64748b" }}>{formattedAddress}</p>
             )}
             {geocoding && !zipOrCityError && (
-              <p className="text-xs text-blue-600 mt-1">Geocoding...</p>
+              <p className="text-xs mt-1" style={{ color: "#14a5aa" }}>Geocoding...</p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Radius (meters)</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Radius (meters)</label>
             <input
               type="number"
               value={radiusMeters}
               onChange={handleRadiusChange}
-              className={`w-full px-3 py-2 bg-white text-black placeholder:text-gray-400 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                radiusError ? "border-red-500" : "border-gray-300"
+              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent ${
+                radiusError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
               placeholder="e.g., 3000"
               min={100}
               max={50000}
             />
             {radiusError && (
-              <p className="text-xs text-red-600 mt-1">{radiusError}</p>
+              <p className="text-xs text-red-500 mt-1">{radiusError}</p>
             )}
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 text-red-600 text-sm">{error}</div>
+          <div className="mb-4 text-red-500 text-sm">{error}</div>
         )}
 
         {runId && (
-          <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-md space-y-2">
-            <div className="text-sm text-gray-900">
+          <div className="mb-4 p-4 rounded-lg space-y-2 border border-[#e2e8f0]" style={{ backgroundColor: "#f1f5f9" }}>
+            <div className="text-sm" style={{ color: "#0A1628" }}>
               <span className="font-bold">Run ID:</span> {runId}
             </div>
             {searchedCount !== null && (
-              <div className="text-sm text-gray-900">
+              <div className="text-sm" style={{ color: "#0A1628" }}>
                 <span className="font-bold">Searched:</span> {searchedCount}
               </div>
             )}
@@ -461,7 +476,8 @@ export default function Home() {
           <button
             onClick={handleRunSearch}
             disabled={loading || geocoding || runCompleted}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2.5 text-white rounded-lg disabled:bg-[#64748b] disabled:cursor-not-allowed font-medium flex items-center justify-center gap-2 transition-colors hover:opacity-90"
+            style={{ backgroundColor: "#2a6f8f" }}
           >
             {loading || geocoding ? (
               <>
@@ -480,105 +496,94 @@ export default function Home() {
           <button
             onClick={handleExport}
             disabled={loading || !runId}
-            className="flex-1 px-4 py-2 text-white rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
-            style={{
-              backgroundColor: runCompleted ? "#1e3a8a" : "#1e40af",
-            }}
-            onMouseEnter={(e) => {
-              if (!loading && runId) {
-                e.currentTarget.style.backgroundColor = "#1e3a8a";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!loading && runId) {
-                e.currentTarget.style.backgroundColor = runCompleted ? "#1e3a8a" : "#1e40af";
-              }
-            }}
+            className="flex-1 px-4 py-2.5 text-white rounded-lg disabled:bg-[#64748b] disabled:cursor-not-allowed font-medium transition-colors hover:opacity-90"
+            style={{ backgroundColor: runCompleted ? "#0A1628" : "#14a5aa" }}
           >
             Export CSV
           </button>
         </div>
 
         {statusMessage && (
-          <div className="mt-3 text-sm text-gray-600 text-center">{statusMessage}</div>
+          <div className="mt-3 text-sm text-center" style={{ color: "#64748b" }}>{statusMessage}</div>
         )}
       </div>
 
       {/* History Section */}
-      <div className="bg-white rounded-lg shadow-md p-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Recent Searches</h2>
+      <div className="bg-white rounded-xl shadow-xl p-8 border border-[#2a6f8f]/10">
+        <h2 className="text-2xl font-bold mb-4 tracking-tight" style={{ color: "#0A1628" }}>Recent Searches</h2>
         
         {loadingHistory ? (
-          <div className="text-center text-gray-600 py-8">Loading history...</div>
+          <div className="text-center py-8" style={{ color: "#64748b" }}>Loading history...</div>
         ) : runs.length === 0 ? (
-          <div className="text-center text-gray-600 py-8">No search history yet. Run a search above to get started.</div>
+          <div className="text-center py-8" style={{ color: "#64748b" }}>No search history yet. Run a search above to get started.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-lg border border-[#e2e8f0]">
             <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <thead>
+                <tr style={{ backgroundColor: "#f8fafc" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Date
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Query
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Location
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Radius
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Results
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="divide-y" style={{ borderColor: "#e2e8f0" }}>
                 {runs.map((run) => (
-                  <tr key={run.runId} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                  <tr key={run.runId} className="hover:bg-[#f8fafc] transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#0A1628" }}>
                       {formatDate(run.createdAt)}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium" style={{ color: "#0A1628" }}>
                       {run.query || "—"}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "—")}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.radiusMeters ? `${run.radiusMeters}m` : "—"}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.resultCount || 0}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {run.status === "ERROR" ? (
-                        <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded">
+                        <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded">
                           Error
                         </span>
                       ) : (
-                        <span className="px-2 py-1 text-xs font-medium rounded" style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}>
+                        <span className="px-2 py-1 text-xs font-medium rounded" style={{ backgroundColor: "#ccfbf1", color: "#14a5aa" }}>
                           Success
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      {run.hasCsv ? (
+                      {run.status !== "ERROR" && (run.resultCount ?? 0) > 0 ? (
                         <button
                           onClick={() => handleDownloadCsv(run.runId, run.csvFilename || `${run.query || "export"}_${run.radiusMeters}m.csv`)}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
+                          className="px-3 py-1.5 rounded-lg font-medium border bg-white transition-colors hover:bg-[#14a5aa] hover:text-white hover:border-[#14a5aa]"
+                          style={{ borderColor: "#14a5aa", color: "#14a5aa" }}
                         >
                           Download CSV
                         </button>
                       ) : (
-                        <span className="text-gray-400">No CSV</span>
+                        <span className="text-gray-400">—</span>
                       )}
                     </td>
                   </tr>
