@@ -4,15 +4,15 @@ import { FieldValue } from "firebase-admin/firestore";
 
 /**
  * POST /api/runs/create
- * 
- * Input: { query: string, lat: number, lng: number, radiusMeters: number, locationName?: string }
- * 
- * Performs search and stores results in Firestore.
+ *
+ * Input: { query, lat, lng, radiusMeters, locationName?, minRating?, minReviews?, maxReviews? }
+ * - minRating: 0–5 (0.5 step), sent to Places API to filter by rating
+ * - minReviews / maxReviews: applied after fetch; keep only places with userRatingCount in range
  */
 export async function POST(req: Request) {
   let runId: string | undefined;
   try {
-    const { query, lat, lng, radiusMeters, locationName } = await req.json();
+    const { query, lat, lng, radiusMeters, locationName, minRating, minReviews, maxReviews } = await req.json();
 
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
@@ -37,6 +37,7 @@ export async function POST(req: Request) {
                 radius: radiusMeters,
               },
             },
+            ...(minRating != null && Number.isFinite(minRating) && { minRating: Number(minRating) }),
           };
 
       const resp = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -63,10 +64,21 @@ export async function POST(req: Request) {
       pageToken = data.nextPageToken || undefined;
     } while (pageToken);
 
+    // Apply min/max review count filters (API does not support these; we filter after fetch)
+    const minRev = minReviews != null && Number.isFinite(Number(minReviews)) ? Number(minReviews) : null;
+    const maxRev = maxReviews != null && Number.isFinite(Number(maxReviews)) ? Number(maxReviews) : null;
+    const filtered = places.filter((p: any) => {
+      const count = p.userRatingCount ?? 0;
+      if (minRev != null && count < minRev) return false;
+      if (maxRev != null && count > maxRev) return false;
+      return true;
+    });
+
     // Generate random runId
     runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-    const searchedCount = places.length;
+    const searchedCount = filtered.length;
+    const totalFetched = places.length;
 
     // Create search run document
     await db.doc(`searchRuns/${runId}`).set({
@@ -75,13 +87,17 @@ export async function POST(req: Request) {
       lng,
       radiusMeters,
       locationName: locationName || null,
+      minRating: minRating != null ? minRating : null,
+      minReviews: minRev ?? null,
+      maxReviews: maxRev ?? null,
       resultCount: searchedCount,
+      totalFetched,
       createdAt: FieldValue.serverTimestamp(),
     });
 
     // Process each place and save to Firestore (search fields only)
-    for (let i = 0; i < places.length; i++) {
-      const place = places[i];
+    for (let i = 0; i < filtered.length; i++) {
+      const place = filtered[i];
       const placeId = place.id;
 
       // Upsert place document with search fields only
@@ -110,6 +126,7 @@ export async function POST(req: Request) {
       ok: true,
       runId,
       searchedCount,
+      totalFetched,
     });
   } catch (e: any) {
     console.error("create run error:", e);
