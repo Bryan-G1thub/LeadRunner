@@ -65,8 +65,8 @@ export default function Home() {
     if (isNaN(num)) {
       return "Must be a valid number";
     }
-    if (num < 100 || num > 50000) {
-      return "Radius must be between 100 and 50000 meters";
+    if (num < 100 || num > 9999) {
+      return "Radius must be between 100 and 9999 meters";
     }
     return null;
   };
@@ -447,7 +447,7 @@ export default function Home() {
               }`}
               placeholder="e.g., 3000"
               min={100}
-              max={50000}
+              max={9999}
             />
             {radiusError && (
               <p className="text-xs text-red-500 mt-1">{radiusError}</p>

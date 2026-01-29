@@ -19,36 +19,49 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing GOOGLE_PLACES_API_KEY" }, { status: 500 });
     }
 
-    // Perform Places Text Search
-    const resp = await fetch("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": apiKey,
-        "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount",
-      },
-      body: JSON.stringify({
-        textQuery: query,
-        locationBias: {
-          circle: {
-            center: { latitude: lat, longitude: lng },
-            radius: radiusMeters,
-          },
+    const fieldMask =
+      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount";
+
+    // Perform Places Text Search with pagination (collect all pages)
+    const places: any[] = [];
+    let pageToken: string | undefined;
+
+    do {
+      const body: Record<string, unknown> = pageToken
+        ? { pageToken }
+        : {
+            textQuery: query,
+            locationBias: {
+              circle: {
+                center: { latitude: lat, longitude: lng },
+                radius: radiusMeters,
+              },
+            },
+          };
+
+      const resp = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": apiKey,
+          "X-Goog-FieldMask": fieldMask,
         },
-      }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      return new NextResponse(text, {
-        status: resp.status,
-        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
-    }
 
-    const data = await resp.json();
-    const places = data.places || [];
+      if (!resp.ok) {
+        const text = await resp.text();
+        return new NextResponse(text, {
+          status: resp.status,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const data = await resp.json();
+      const pagePlaces = data.places || [];
+      places.push(...pagePlaces);
+      pageToken = data.nextPageToken || undefined;
+    } while (pageToken);
 
     // Generate random runId
     runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
