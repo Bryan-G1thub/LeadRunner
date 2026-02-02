@@ -442,7 +442,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-xl shadow-xl p-8 mb-6 border border-[#2a6f8f]/10">
           <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: "#0A1628" }}>Stonebrook Lead Runner</h1>
-          <p className="text-sm mb-6" style={{ color: "#64748b" }}>Search → Enrich → Export in one click</p>
+          <p className="text-sm mb-6" style={{ color: "#64748b" }}>Search → Export in one click</p>
 
         <div className="space-y-4 mb-6">
           <div>
@@ -631,29 +631,29 @@ export default function Home() {
         ) : runs.length === 0 ? (
           <div className="text-center py-8" style={{ color: "#64748b" }}>No search history yet. Run a search above to get started.</div>
         ) : (
-          <div className="overflow-x-auto overflow-y-visible rounded-lg border border-[#e2e8f0]">
-            <table className="w-full">
+          <div className="rounded-lg border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full table-fixed" style={{ minWidth: 0 }}>
               <thead>
                 <tr style={{ backgroundColor: "#f8fafc" }}>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[100px]" style={{ color: "#64748b" }}>
                     Date
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[90px]" style={{ color: "#64748b" }}>
                     Query
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Location
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[70px]" style={{ color: "#64748b" }}>
                     Radius
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[68px]" style={{ color: "#64748b" }}>
                     Results
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[76px]" style={{ color: "#64748b" }}>
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[140px]" style={{ color: "#64748b" }}>
                     Actions
                   </th>
                 </tr>
@@ -661,22 +661,22 @@ export default function Home() {
               <tbody className="divide-y" style={{ borderColor: "#e2e8f0" }}>
                 {runs.map((run, runIndex) => (
                   <tr key={run.runId} className="hover:bg-[#f8fafc] transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#0A1628" }}>
+                    <td className="px-2 py-3 text-sm truncate max-w-[100px]" style={{ color: "#0A1628" }} title={formatDate(run.createdAt)}>
                       {formatDate(run.createdAt)}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium" style={{ color: "#0A1628" }}>
+                    <td className="px-2 py-3 text-sm truncate max-w-[90px] font-medium" style={{ color: "#0A1628" }} title={run.query || ""}>
                       {run.query || "—"}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
+                    <td className="px-2 py-3 text-sm truncate" style={{ color: "#64748b" }} title={run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "")}>
                       {run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "—")}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
+                    <td className="px-2 py-3 text-sm whitespace-nowrap" style={{ color: "#64748b" }}>
                       {run.radiusMeters ? `${run.radiusMeters}m` : "—"}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
+                    <td className="px-2 py-3 text-sm whitespace-nowrap" style={{ color: "#64748b" }}>
                       {run.resultCount || 0}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="px-2 py-3 whitespace-nowrap">
                       {run.status === "ERROR" ? (
                         <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded">
                           Error
@@ -687,8 +687,8 @@ export default function Home() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      <div className="flex items-center gap-2">
+                    <td className="px-2 py-3 text-sm">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {run.status !== "ERROR" && (run.resultCount ?? 0) > 0 ? (
                           <button
                             onClick={() => handleDownloadCsv(run.runId, run.csvFilename || `${run.query || "export"}_${run.radiusMeters}m.csv`)}
