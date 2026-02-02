@@ -631,29 +631,32 @@ export default function Home() {
         ) : runs.length === 0 ? (
           <div className="text-center py-8" style={{ color: "#64748b" }}>No search history yet. Run a search above to get started.</div>
         ) : (
-          <div className="rounded-lg border border-[#e2e8f0] overflow-hidden">
-            <table className="w-full table-fixed" style={{ minWidth: 0 }}>
+          <div
+            className="overflow-x-auto rounded-lg border border-[#e2e8f0] [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: "none" }}
+          >
+            <table className="w-full">
               <thead>
                 <tr style={{ backgroundColor: "#f8fafc" }}>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[100px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Date
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[90px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Query
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Location
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[70px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Radius
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[68px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Results
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[76px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Status
                   </th>
-                  <th className="px-2 py-3 text-left text-xs font-medium uppercase tracking-wider w-[140px]" style={{ color: "#64748b" }}>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: "#64748b" }}>
                     Actions
                   </th>
                 </tr>
@@ -661,22 +664,22 @@ export default function Home() {
               <tbody className="divide-y" style={{ borderColor: "#e2e8f0" }}>
                 {runs.map((run, runIndex) => (
                   <tr key={run.runId} className="hover:bg-[#f8fafc] transition-colors">
-                    <td className="px-2 py-3 text-sm truncate max-w-[100px]" style={{ color: "#0A1628" }} title={formatDate(run.createdAt)}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#0A1628" }}>
                       {formatDate(run.createdAt)}
                     </td>
-                    <td className="px-2 py-3 text-sm truncate max-w-[90px] font-medium" style={{ color: "#0A1628" }} title={run.query || ""}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium" style={{ color: "#0A1628" }}>
                       {run.query || "—"}
                     </td>
-                    <td className="px-2 py-3 text-sm truncate" style={{ color: "#64748b" }} title={run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "")}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.locationName || (run.lat && run.lng ? `${run.lat}, ${run.lng}` : "—")}
                     </td>
-                    <td className="px-2 py-3 text-sm whitespace-nowrap" style={{ color: "#64748b" }}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.radiusMeters ? `${run.radiusMeters}m` : "—"}
                     </td>
-                    <td className="px-2 py-3 text-sm whitespace-nowrap" style={{ color: "#64748b" }}>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm" style={{ color: "#64748b" }}>
                       {run.resultCount || 0}
                     </td>
-                    <td className="px-2 py-3 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {run.status === "ERROR" ? (
                         <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded">
                           Error
@@ -687,8 +690,8 @@ export default function Home() {
                         </span>
                       )}
                     </td>
-                    <td className="px-2 py-3 text-sm">
-                      <div className="flex items-center gap-2 flex-wrap">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <div className="flex items-center gap-2">
                         {run.status !== "ERROR" && (run.resultCount ?? 0) > 0 ? (
                           <button
                             onClick={() => handleDownloadCsv(run.runId, run.csvFilename || `${run.query || "export"}_${run.radiusMeters}m.csv`)}
