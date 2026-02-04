@@ -387,6 +387,7 @@ export default function Home() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      setStatusMessage("CSV exported successfully.");
       // Refresh history after export
       fetchRuns();
     } catch (e: any) {
@@ -463,7 +464,7 @@ export default function Home() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Zip Code or City</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Location (zip, city, or lat,lng)</label>
             <input
               type="text"
               value={zipOrCity}
@@ -471,7 +472,7 @@ export default function Home() {
               className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent ${
                 zipOrCityError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
-              placeholder="e.g., 11201 or Brooklyn, NY"
+              placeholder="e.g. 11201, Brooklyn NY, or 40.81,-73.69"
               maxLength={100}
             />
             {zipOrCityError && (
