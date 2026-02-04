@@ -60,6 +60,13 @@ export async function POST(req: Request) {
       }
     }
 
+    // Sort places alphabetically by name (case-insensitive)
+    places.sort((a, b) => {
+      const nameA = (a.name || "").toLowerCase();
+      const nameB = (b.name || "").toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
     // Build CSV
     const escapeCsv = (value: any): string => {
       if (value === null || value === undefined) return "";
