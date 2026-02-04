@@ -15,6 +15,16 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Reset completed state when user starts typing
+  const resetCompletedState = () => {
+    setRunId(null);
+    setCount(null);
+    setEnrichStatus(null);
+    setEnrichUpdatedCount(null);
+    setEnrichFailedCount(null);
+    setError(null);
+  };
+
   const handleSearch = async () => {
     setError(null);
     setLoading(true);
@@ -125,7 +135,10 @@ export default function LeadsPage() {
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            resetCompletedState();
+          }}
           style={{ width: "100%", padding: "0.5rem" }}
           placeholder="e.g., restaurants"
         />
@@ -136,7 +149,10 @@ export default function LeadsPage() {
         <input
           type="number"
           value={lat}
-          onChange={(e) => setLat(e.target.value)}
+          onChange={(e) => {
+            setLat(e.target.value);
+            resetCompletedState();
+          }}
           style={{ width: "100%", padding: "0.5rem" }}
           placeholder="e.g., 37.7749"
         />
@@ -147,7 +163,10 @@ export default function LeadsPage() {
         <input
           type="number"
           value={lng}
-          onChange={(e) => setLng(e.target.value)}
+          onChange={(e) => {
+            setLng(e.target.value);
+            resetCompletedState();
+          }}
           style={{ width: "100%", padding: "0.5rem" }}
           placeholder="e.g., -122.4194"
         />
@@ -158,7 +177,10 @@ export default function LeadsPage() {
         <input
           type="number"
           value={radiusMeters}
-          onChange={(e) => setRadiusMeters(e.target.value)}
+          onChange={(e) => {
+            setRadiusMeters(e.target.value);
+            resetCompletedState();
+          }}
           style={{ width: "100%", padding: "0.5rem" }}
           placeholder="e.g., 5000"
         />
