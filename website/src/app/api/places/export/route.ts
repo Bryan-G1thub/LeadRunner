@@ -62,8 +62,8 @@ export async function POST(req: Request) {
 
     // Sort places alphabetically by name (case-insensitive)
     places.sort((a, b) => {
-      const nameA = (a.name || "").toLowerCase();
-      const nameB = (b.name || "").toLowerCase();
+      const nameA = (a.displayName || "").toLowerCase();
+      const nameB = (b.displayName || "").toLowerCase();
       return nameA.localeCompare(nameB);
     });
 
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
 
     const headers = ["name", "rating", "userRatingCount", "formattedAddress", "types", "googleSearchUrl"];
     const rows = places.map((place) => {
-      const name = place.name || "";
+      const name = place.displayName || "";
       const types = Array.isArray(place.types) ? place.types.join("; ") : "";
       const googleSearchUrl = createGoogleSearchUrl(name);
       return [
