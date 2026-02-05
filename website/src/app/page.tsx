@@ -440,7 +440,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen p-4 md:p-6" style={{ backgroundColor: "#0A1628" }}>
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="bg-white rounded-xl shadow-xl p-8 mb-6 border border-[#2a6f8f]/10">
           <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: "#0A1628" }}>Stonebrook Lead Runner</h1>
           <p className="text-sm mb-6" style={{ color: "#64748b" }}>Search → Export in one click</p>
