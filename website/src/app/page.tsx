@@ -30,6 +30,7 @@ export default function Home() {
   const [minReviews, setMinReviews] = useState("");
   const [maxReviews, setMaxReviews] = useState("");
   const [filterError, setFilterError] = useState<string | null>(null);
+  const [autoExport, setAutoExport] = useState(false);
 
   // Validation helpers
   const validateQuery = (value: string): string | null => {
@@ -338,7 +339,47 @@ export default function Home() {
       setSearchedCount(data.searchedCount);
       setTotalFetched(data.totalFetched ?? null);
       setRunCompleted(true);
-      setStatusMessage("Done. You can export CSV.");
+      
+      // Auto export if enabled
+      if (autoExport && data.runId) {
+        setStatusMessage("Exporting CSV…");
+        try {
+          const exportResponse = await fetch("/api/places/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ runId: data.runId }),
+          });
+
+          if (!exportResponse.ok) {
+            const errorData = await exportResponse.json();
+            throw new Error(errorData.error || "Export failed");
+          }
+
+          const contentDisposition = exportResponse.headers.get("Content-Disposition");
+          let filename = "leads.csv";
+          if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (filenameMatch && filenameMatch[1]) {
+              filename = filenameMatch[1].replace(/['"]/g, "");
+            }
+          }
+
+          const blob = await exportResponse.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setStatusMessage("CSV exported successfully.");
+        } catch (exportErr: any) {
+          setStatusMessage("Search done. Auto-export failed: " + (exportErr.message || "Unknown error"));
+        }
+      } else {
+        setStatusMessage("Done. You can export CSV.");
+      }
       // Refresh history after new search
       fetchRuns();
     } catch (e: any) {
@@ -586,6 +627,25 @@ export default function Home() {
             )}
           </div>
         )}
+
+        <div className="flex items-center justify-end mb-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-sm font-medium" style={{ color: "#64748b" }}>Auto Export</span>
+            <button
+              type="button"
+              onClick={() => setAutoExport(!autoExport)}
+              className={`relative w-11 h-6 rounded-full transition-colors ${
+                autoExport ? "bg-[#14a5aa]" : "bg-[#e2e8f0]"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  autoExport ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </label>
+        </div>
 
         <div className="flex gap-4">
           <button
