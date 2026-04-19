@@ -383,9 +383,11 @@ export default function Home() {
         const batchRunId = initData.runId;
         setRunId(batchRunId);
         
-        // Process each coord
+        // Process each coord, tracking seen placeIds to skip duplicates
         let totalSearched = 0;
         let totalFetchedCount = 0;
+        let totalSkippedDupes = 0;
+        const seenPlaceIds: string[] = [];
         
         for (let i = 0; i < batchCoords.length; i++) {
           const coord = batchCoords[i];
@@ -405,6 +407,7 @@ export default function Home() {
               minReviews: minReviews.trim() ? parseInt(minReviews) : undefined,
               maxReviews: maxReviews.trim() ? parseInt(maxReviews) : undefined,
               runId: batchRunId, // Append to existing run
+              seenPlaceIds, // Pass seen placeIds to skip duplicates
             }),
           });
 
@@ -417,6 +420,12 @@ export default function Home() {
 
           const data = await response.json();
           totalSearched += data.searchedCount || 0;
+          totalSkippedDupes += data.skippedDupes || 0;
+          
+          // Add new placeIds to seen list for next iteration
+          if (Array.isArray(data.newPlaceIds)) {
+            seenPlaceIds.push(...data.newPlaceIds);
+          }
           totalFetchedCount += data.totalFetched || 0;
         }
         
@@ -429,7 +438,8 @@ export default function Home() {
         if (autoExport) {
           await performAutoExport(batchRunId);
         } else {
-          setStatusMessage(`Done. ${totalSearched} unique results from ${batchCoords.length} locations.`);
+          const dupeMsg = totalSkippedDupes > 0 ? ` (${totalSkippedDupes} duplicates skipped)` : "";
+          setStatusMessage(`Done. ${totalSearched} unique results from ${batchCoords.length} locations${dupeMsg}.`);
         }
         
         fetchRuns();

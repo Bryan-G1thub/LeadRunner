@@ -5,16 +5,20 @@ import { FieldValue } from "firebase-admin/firestore";
 /**
  * POST /api/runs/create
  *
- * Input: { query, lat, lng, radiusMeters, locationName?, minRating?, minReviews?, maxReviews?, runId? }
+ * Input: { query, lat, lng, radiusMeters, locationName?, minRating?, minReviews?, maxReviews?, runId?, seenPlaceIds? }
  * - minRating: 0–5 (0.5 step), sent to Places API to filter by rating
  * - minReviews / maxReviews: applied after fetch; keep only places with userRatingCount in range
  * - runId: optional - if provided, appends results to existing run instead of creating new one
+ * - seenPlaceIds: optional - array of placeIds already seen in batch; these will be skipped to save Firestore writes
  */
 export async function POST(req: Request) {
   let runId: string | undefined;
   let isAppendMode = false;
   try {
-    const { query, lat, lng, radiusMeters, locationName, minRating, minReviews, maxReviews, runId: providedRunId } = await req.json();
+    const { query, lat, lng, radiusMeters, locationName, minRating, minReviews, maxReviews, runId: providedRunId, seenPlaceIds } = await req.json();
+    
+    // Convert seenPlaceIds to a Set for O(1) lookups
+    const seenSet = new Set<string>(Array.isArray(seenPlaceIds) ? seenPlaceIds : []);
     
     // If runId provided, we're appending to an existing run
     if (providedRunId) {
@@ -75,12 +79,19 @@ export async function POST(req: Request) {
     // Apply min/max review count filters (API does not support these; we filter after fetch)
     const minRev = minReviews != null && Number.isFinite(Number(minReviews)) ? Number(minReviews) : null;
     const maxRev = maxReviews != null && Number.isFinite(Number(maxReviews)) ? Number(maxReviews) : null;
-    const filtered = places.filter((p: any) => {
+    const filteredByReviews = places.filter((p: any) => {
       const count = p.userRatingCount ?? 0;
       if (minRev != null && count < minRev) return false;
       if (maxRev != null && count > maxRev) return false;
       return true;
     });
+
+    // Filter out already-seen places (for batch dedup optimization)
+    const filtered = filteredByReviews.filter((p: any) => !seenSet.has(p.id));
+    const skippedDupes = filteredByReviews.length - filtered.length;
+    
+    // Track new placeIds to return to caller
+    const newPlaceIds = filtered.map((p: any) => p.id);
 
     // Generate random runId if not in append mode
     if (!isAppendMode) {
@@ -148,6 +159,8 @@ export async function POST(req: Request) {
       runId,
       searchedCount,
       totalFetched,
+      newPlaceIds,
+      skippedDupes,
     });
   } catch (e: any) {
     console.error("create run error:", e);
