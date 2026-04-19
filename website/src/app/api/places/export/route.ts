@@ -56,28 +56,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No results found for this runId" }, { status: 404 });
     }
 
-    // Get placeIds from results
+    // Get placeIds from results (same order as rank)
     const placeIds = resultsSnapshot.docs.map((doc) => doc.data().placeId);
 
-    // Fetch place documents from Firestore
-    const places: any[] = [];
-    for (const placeId of placeIds) {
+    const hasWebsiteUri = (place: any): boolean =>
+      !!(place?.websiteUri && String(place.websiteUri).trim() !== "");
+
+    // Fetch place documents from Firestore, keep search rank for stable ordering
+    const placesWithRank: { place: any; rank: number }[] = [];
+    for (let i = 0; i < placeIds.length; i++) {
+      const placeId = placeIds[i];
+      const rank = resultsSnapshot.docs[i]?.data()?.rank ?? i + 1;
       try {
         const placeDoc = await db.doc(`places/${placeId}`).get();
         if (placeDoc.exists) {
-          places.push(placeDoc.data());
+          placesWithRank.push({ place: placeDoc.data(), rank });
         }
       } catch (e) {
         console.error(`Error fetching place ${placeId}:`, e);
       }
     }
 
-    // Sort places alphabetically by name (case-insensitive)
-    places.sort((a, b) => {
-      const nameA = (a.name || "").toLowerCase();
-      const nameB = (b.name || "").toLowerCase();
-      return nameA.localeCompare(nameB);
+    // Rows with a website first (for manual site QA); no-site rows at the bottom
+    placesWithRank.sort((a, b) => {
+      const wa = hasWebsiteUri(a.place) ? 0 : 1;
+      const wb = hasWebsiteUri(b.place) ? 0 : 1;
+      if (wa !== wb) return wa - wb;
+      return (a.rank ?? 0) - (b.rank ?? 0);
     });
+
+    const places = placesWithRank.map((x) => x.place);
 
     // Build CSV
     const escapeCsv = (value: any): string => {
