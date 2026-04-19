@@ -644,11 +644,12 @@ export default function Home() {
             <textarea
               value={zipOrCity}
               onChange={handleZipOrCityChange}
-              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent resize-y min-h-[120px] ${
+              className={`w-full px-3 py-3 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent resize-y ${
                 zipOrCityError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
+              style={{ minHeight: "150px" }}
               placeholder={"Single: 11201, Brooklyn NY, or 40.81,-73.69\n\nBatch (one lat,lng per line):\n40.81,-73.69\n40.75,-73.98\n40.68,-73.95"}
-              rows={5}
+              rows={6}
             />
             <p className="text-xs mt-1" style={{ color: "#64748b" }}>
               Single location or multiple lat,lng coords (one per line for batch)
