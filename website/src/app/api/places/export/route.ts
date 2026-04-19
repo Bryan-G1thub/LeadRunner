@@ -30,9 +30,21 @@ export async function POST(req: Request) {
     const runData = runDoc.data();
     const query = runData?.query || "";
     const radiusMeters = runData?.radiusMeters || 0;
-    const locationName = runData?.locationName || "";
-    const lat = runData?.lat || "";
-    const lng = runData?.lng || "";
+    
+    // Handle both single location and batch coords schemas
+    let locationName = runData?.locationName || "";
+    let lat = runData?.lat || "";
+    let lng = runData?.lng || "";
+    let coordCount = 1;
+    
+    if (Array.isArray(runData?.lats) && runData.lats.length > 0) {
+      coordCount = runData.lats.length;
+      lat = runData.lats[0];
+      lng = runData.lngs?.[0] || "";
+      if (Array.isArray(runData?.locationNames) && runData.locationNames[0]) {
+        locationName = runData.locationNames[0];
+      }
+    }
 
     // Get results from searchRuns/{runId}/results in rank order
     const resultsSnapshot = await db
@@ -88,17 +100,19 @@ export async function POST(req: Request) {
       return `https://www.google.com/search?q=${normalized}`;
     };
 
-    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "types", "googleSearchUrl"];
+    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "types", "has_website", "googleSearchUrl"];
     const rows = places.map((place) => {
       const name = place.name || "";
       const types = Array.isArray(place.types) ? place.types.join("; ") : "";
       const googleSearchUrl = createGoogleSearchUrl(name);
+      const hasWebsite = place.websiteUri && place.websiteUri.trim() !== "" ? "true" : "false";
       return [
         escapeCsv(name),
         escapeCsv(place.rating || ""),
         escapeCsv(place.userRatingCount || ""),
         escapeCsv(place.formattedAddress || ""),
         escapeCsv(types),
+        escapeCsv(hasWebsite),
         escapeCsv(googleSearchUrl),
       ];
     });
@@ -122,7 +136,8 @@ export async function POST(req: Request) {
     }
     
     const queryStr = sanitizeFilename(query) || "query";
-    const filename = `${queryStr}_${locationStr}_${radiusMeters}m.csv`;
+    const batchSuffix = coordCount > 1 ? `_${coordCount}locs` : "";
+    const filename = `${queryStr}_${locationStr}_${radiusMeters}m${batchSuffix}.csv`;
 
     const csv = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
 

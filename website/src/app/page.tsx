@@ -31,6 +31,7 @@ export default function Home() {
   const [maxReviews, setMaxReviews] = useState("");
   const [filterError, setFilterError] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Validation helpers
   const validateQuery = (value: string): string | null => {
@@ -51,8 +52,33 @@ export default function Home() {
 
   const validateZipOrCity = (value: string): string | null => {
     if (!value.trim()) {
-      return "Zip code or city is required";
+      return "Location is required";
     }
+    // Check if it's multiline (batch coords mode)
+    const lines = value.trim().split('\n').filter(line => line.trim());
+    if (lines.length > 1) {
+      // Batch mode: each line must be lat,lng
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const parts = line.split(',').map(p => p.trim());
+        if (parts.length !== 2) {
+          return `Line ${i + 1}: Must be lat,lng format`;
+        }
+        const lat = parseFloat(parts[0]);
+        const lng = parseFloat(parts[1]);
+        if (isNaN(lat) || isNaN(lng)) {
+          return `Line ${i + 1}: Invalid coordinates`;
+        }
+        if (lat < -90 || lat > 90) {
+          return `Line ${i + 1}: Latitude must be between -90 and 90`;
+        }
+        if (lng < -180 || lng > 180) {
+          return `Line ${i + 1}: Longitude must be between -180 and 180`;
+        }
+      }
+      return null;
+    }
+    // Single location mode
     if (!/^[a-zA-Z0-9\s,\-\.]+$/.test(value)) {
       return "Only alphanumeric characters, spaces, commas, hyphens, and periods allowed";
     }
@@ -106,7 +132,7 @@ export default function Home() {
     setRunCompleted(false);
   };
 
-  const handleZipOrCityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleZipOrCityChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setZipOrCity(e.target.value);
     setFormattedAddress(null);
     setError(null);
@@ -283,6 +309,29 @@ export default function Home() {
     }
   };
 
+  // Parse coords from input - returns array of {lat, lng, locationName}
+  const parseCoords = (input: string): { lat: number; lng: number; locationName: string }[] | null => {
+    const lines = input.trim().split('\n').filter(line => line.trim());
+    
+    // Check if it's batch mode (multiline with lat,lng format)
+    if (lines.length > 1 || (lines.length === 1 && /^-?\d+\.?\d*\s*,\s*-?\d+\.?\d*$/.test(lines[0].trim()))) {
+      const coords: { lat: number; lng: number; locationName: string }[] = [];
+      for (const line of lines) {
+        const parts = line.trim().split(',').map(p => p.trim());
+        if (parts.length === 2) {
+          const lat = parseFloat(parts[0]);
+          const lng = parseFloat(parts[1]);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            coords.push({ lat, lng, locationName: `${lat},${lng}` });
+          }
+        }
+      }
+      return coords.length > 0 ? coords : null;
+    }
+    
+    return null; // Not batch mode
+  };
+
   const handleRunSearch = async () => {
     const queryErr = validateQuery(query);
     const zipErr = validateZipOrCity(zipOrCity);
@@ -301,93 +350,179 @@ export default function Home() {
 
     setError(null);
     setLoading(true);
-    // Keep previous runId until we have a new one, so main Export stays clickable if this run fails
+    setBatchProgress(null);
+    
     try {
-      // First geocode the location
-      const location = await geocodeLocation();
-      if (!location) {
-        setLoading(false);
-        setStatusMessage(null);
-        return;
-      }
-
-      setStatusMessage("Running search…");
-
-      // Run search
-      const response = await fetch("/api/runs/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: query.trim(),
-          lat: location.lat,
-          lng: location.lng,
-          radiusMeters: parseInt(radiusMeters),
-          locationName: formattedAddress || zipOrCity.trim(),
-          minRating: minRating.trim() ? parseFloat(minRating) : undefined,
-          minReviews: minReviews.trim() ? parseInt(minReviews) : undefined,
-          maxReviews: maxReviews.trim() ? parseInt(maxReviews) : undefined,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Search failed");
-      }
-
-      const data = await response.json();
-      setRunId(data.runId);
-      setSearchedCount(data.searchedCount);
-      setTotalFetched(data.totalFetched ?? null);
-      setRunCompleted(true);
+      // Check if batch mode (multiple coords)
+      const batchCoords = parseCoords(zipOrCity);
       
-      // Auto export if enabled
-      if (autoExport && data.runId) {
-        setStatusMessage("Exporting CSV…");
-        try {
-          const exportResponse = await fetch("/api/places/export", {
+      if (batchCoords && batchCoords.length > 1) {
+        // Batch mode: multiple coordinates
+        setStatusMessage(`Initializing batch search (${batchCoords.length} locations)…`);
+        
+        // Initialize the run with all coords
+        const initResponse = await fetch("/api/runs/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: query.trim(),
+            coords: batchCoords,
+            radiusMeters: parseInt(radiusMeters),
+            minRating: minRating.trim() ? parseFloat(minRating) : undefined,
+            minReviews: minReviews.trim() ? parseInt(minReviews) : undefined,
+            maxReviews: maxReviews.trim() ? parseInt(maxReviews) : undefined,
+          }),
+        });
+
+        if (!initResponse.ok) {
+          const errorData = await initResponse.json();
+          throw new Error(errorData.error || "Failed to initialize batch run");
+        }
+
+        const initData = await initResponse.json();
+        const batchRunId = initData.runId;
+        setRunId(batchRunId);
+        
+        // Process each coord
+        let totalSearched = 0;
+        let totalFetchedCount = 0;
+        
+        for (let i = 0; i < batchCoords.length; i++) {
+          const coord = batchCoords[i];
+          setBatchProgress({ current: i + 1, total: batchCoords.length });
+          setStatusMessage(`Searching location ${i + 1} of ${batchCoords.length}…`);
+          
+          const response = await fetch("/api/runs/create", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ runId: data.runId }),
+            body: JSON.stringify({
+              query: query.trim(),
+              lat: coord.lat,
+              lng: coord.lng,
+              radiusMeters: parseInt(radiusMeters),
+              locationName: coord.locationName,
+              minRating: minRating.trim() ? parseFloat(minRating) : undefined,
+              minReviews: minReviews.trim() ? parseInt(minReviews) : undefined,
+              maxReviews: maxReviews.trim() ? parseInt(maxReviews) : undefined,
+              runId: batchRunId, // Append to existing run
+            }),
           });
 
-          if (!exportResponse.ok) {
-            const errorData = await exportResponse.json();
-            throw new Error(errorData.error || "Export failed");
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error(`Error on coord ${i + 1}:`, errorData.error);
+            // Continue with other coords even if one fails
+            continue;
           }
 
-          const contentDisposition = exportResponse.headers.get("Content-Disposition");
-          let filename = "leads.csv";
-          if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (filenameMatch && filenameMatch[1]) {
-              filename = filenameMatch[1].replace(/['"]/g, "");
-            }
-          }
-
-          const blob = await exportResponse.blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
-          setStatusMessage("CSV exported successfully.");
-        } catch (exportErr: any) {
-          setStatusMessage("Search done. Auto-export failed: " + (exportErr.message || "Unknown error"));
+          const data = await response.json();
+          totalSearched += data.searchedCount || 0;
+          totalFetchedCount += data.totalFetched || 0;
         }
+        
+        setSearchedCount(totalSearched);
+        setTotalFetched(totalFetchedCount);
+        setBatchProgress(null);
+        setRunCompleted(true);
+        
+        // Auto export if enabled
+        if (autoExport) {
+          await performAutoExport(batchRunId);
+        } else {
+          setStatusMessage(`Done. ${totalSearched} unique results from ${batchCoords.length} locations.`);
+        }
+        
+        fetchRuns();
       } else {
-        setStatusMessage("Done. You can export CSV.");
+        // Single location mode (original behavior)
+        const location = await geocodeLocation();
+        if (!location) {
+          setLoading(false);
+          setStatusMessage(null);
+          return;
+        }
+
+        setStatusMessage("Running search…");
+
+        const response = await fetch("/api/runs/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: query.trim(),
+            lat: location.lat,
+            lng: location.lng,
+            radiusMeters: parseInt(radiusMeters),
+            locationName: formattedAddress || zipOrCity.trim(),
+            minRating: minRating.trim() ? parseFloat(minRating) : undefined,
+            minReviews: minReviews.trim() ? parseInt(minReviews) : undefined,
+            maxReviews: maxReviews.trim() ? parseInt(maxReviews) : undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Search failed");
+        }
+
+        const data = await response.json();
+        setRunId(data.runId);
+        setSearchedCount(data.searchedCount);
+        setTotalFetched(data.totalFetched ?? null);
+        setRunCompleted(true);
+        
+        // Auto export if enabled
+        if (autoExport && data.runId) {
+          await performAutoExport(data.runId);
+        } else {
+          setStatusMessage("Done. You can export CSV.");
+        }
+        
+        fetchRuns();
       }
-      // Refresh history after new search
-      fetchRuns();
     } catch (e: any) {
       setError(e.message || "Search failed");
       setStatusMessage(null);
-      // Don't clear runId on failure so main Export stays clickable (previous run if any)
+      setBatchProgress(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const performAutoExport = async (exportRunId: string) => {
+    setStatusMessage("Exporting CSV…");
+    try {
+      const exportResponse = await fetch("/api/places/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: exportRunId }),
+      });
+
+      if (!exportResponse.ok) {
+        const errorData = await exportResponse.json();
+        throw new Error(errorData.error || "Export failed");
+      }
+
+      const contentDisposition = exportResponse.headers.get("Content-Disposition");
+      let filename = "leads.csv";
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, "");
+        }
+      }
+
+      const blob = await exportResponse.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setStatusMessage("CSV exported successfully.");
+    } catch (exportErr: any) {
+      setStatusMessage("Search done. Auto-export failed: " + (exportErr.message || "Unknown error"));
     }
   };
 
@@ -505,17 +640,19 @@ export default function Home() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Location (zip, city, or lat,lng)</label>
-            <input
-              type="text"
+            <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Location(s)</label>
+            <textarea
               value={zipOrCity}
               onChange={handleZipOrCityChange}
-              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent ${
+              className={`w-full px-3 py-2.5 bg-white text-[#0A1628] placeholder:text-[#64748b] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent resize-y min-h-[80px] ${
                 zipOrCityError ? "border-red-500" : "border-[#2a6f8f]/30"
               }`}
-              placeholder="e.g. 11201, Brooklyn NY, or 40.81,-73.69"
-              maxLength={100}
+              placeholder={"Single: 11201, Brooklyn NY, or 40.81,-73.69\nBatch: one lat,lng per line:\n40.81,-73.69\n40.75,-73.98"}
+              rows={3}
             />
+            <p className="text-xs mt-1" style={{ color: "#64748b" }}>
+              Single location or multiple lat,lng coords (one per line for batch)
+            </p>
             {zipOrCityError && (
               <p className="text-xs text-red-500 mt-1">{zipOrCityError}</p>
             )}
@@ -679,7 +816,22 @@ export default function Home() {
         </div>
 
         {statusMessage && (
-          <div className="mt-3 text-sm text-center" style={{ color: "#64748b" }}>{statusMessage}</div>
+          <div className="mt-3 text-sm text-center" style={{ color: "#64748b" }}>
+            {statusMessage}
+            {batchProgress && (
+              <div className="mt-2">
+                <div className="w-full bg-[#e2e8f0] rounded-full h-2">
+                  <div 
+                    className="h-2 rounded-full transition-all duration-300"
+                    style={{ 
+                      backgroundColor: "#14a5aa",
+                      width: `${(batchProgress.current / batchProgress.total) * 100}%` 
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -5,14 +5,22 @@ import { FieldValue } from "firebase-admin/firestore";
 /**
  * POST /api/runs/create
  *
- * Input: { query, lat, lng, radiusMeters, locationName?, minRating?, minReviews?, maxReviews? }
+ * Input: { query, lat, lng, radiusMeters, locationName?, minRating?, minReviews?, maxReviews?, runId? }
  * - minRating: 0–5 (0.5 step), sent to Places API to filter by rating
  * - minReviews / maxReviews: applied after fetch; keep only places with userRatingCount in range
+ * - runId: optional - if provided, appends results to existing run instead of creating new one
  */
 export async function POST(req: Request) {
   let runId: string | undefined;
+  let isAppendMode = false;
   try {
-    const { query, lat, lng, radiusMeters, locationName, minRating, minReviews, maxReviews } = await req.json();
+    const { query, lat, lng, radiusMeters, locationName, minRating, minReviews, maxReviews, runId: providedRunId } = await req.json();
+    
+    // If runId provided, we're appending to an existing run
+    if (providedRunId) {
+      runId = providedRunId;
+      isAppendMode = true;
+    }
 
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
@@ -20,7 +28,7 @@ export async function POST(req: Request) {
     }
 
     const fieldMask =
-      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount";
+      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.websiteUri";
 
     // Perform Places Text Search with pagination (collect all pages)
     const places: any[] = [];
@@ -74,26 +82,38 @@ export async function POST(req: Request) {
       return true;
     });
 
-    // Generate random runId
-    runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    // Generate random runId if not in append mode
+    if (!isAppendMode) {
+      runId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    }
 
     const searchedCount = filtered.length;
     const totalFetched = places.length;
 
-    // Create search run document
-    await db.doc(`searchRuns/${runId}`).set({
-      query,
-      lat,
-      lng,
-      radiusMeters,
-      locationName: locationName || null,
-      minRating: minRating != null ? minRating : null,
-      minReviews: minRev ?? null,
-      maxReviews: maxRev ?? null,
-      resultCount: searchedCount,
-      totalFetched,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    // Create or update search run document
+    if (isAppendMode) {
+      // Append mode: update counts by incrementing
+      await db.doc(`searchRuns/${runId}`).update({
+        resultCount: FieldValue.increment(searchedCount),
+        totalFetched: FieldValue.increment(totalFetched),
+        coordsProcessed: FieldValue.increment(1),
+      });
+    } else {
+      // New run: create the document
+      await db.doc(`searchRuns/${runId}`).set({
+        query,
+        lat,
+        lng,
+        radiusMeters,
+        locationName: locationName || null,
+        minRating: minRating != null ? minRating : null,
+        minReviews: minRev ?? null,
+        maxReviews: maxRev ?? null,
+        resultCount: searchedCount,
+        totalFetched,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
 
     // Process each place and save to Firestore (search fields only)
     for (let i = 0; i < filtered.length; i++) {
@@ -109,6 +129,7 @@ export async function POST(req: Request) {
           rating: place.rating || null,
           userRatingCount: place.userRatingCount || null,
           types: place.types || [],
+          websiteUri: place.websiteUri || null,
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
