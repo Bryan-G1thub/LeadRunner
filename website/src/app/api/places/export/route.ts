@@ -97,27 +97,16 @@ export async function POST(req: Request) {
       return str;
     };
 
-    /** Google Sheets dialer link; empty if either phone field is missing. */
-    const phoneHyperlinkCsv = (internationalPhoneNumber: unknown, nationalPhoneNumber: unknown): string => {
-      if (internationalPhoneNumber == null || nationalPhoneNumber == null) return "";
-      const intl = String(internationalPhoneNumber).trim();
-      const national = String(nationalPhoneNumber).trim();
-      if (!intl || !national) return "";
-      const telHref = intl.replace(/\s/g, "");
-      const labelForFormula = national.replace(/"/g, '""');
-      const formula = `=HYPERLINK("tel:${telHref}","${labelForFormula}")`;
-      return escapeCsv(formula);
-    };
-
-    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "nationalPhoneNumber", "websiteUri"];
+    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "phoneNumber", "websiteUri"];
     const rows = places.map((place) => {
       const name = place.name || "";
+      const phoneNumber = place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? "";
       return [
         escapeCsv(name),
         escapeCsv(place.rating || ""),
         escapeCsv(place.userRatingCount || ""),
         escapeCsv(place.formattedAddress || ""),
-        phoneHyperlinkCsv(place.internationalPhoneNumber, place.nationalPhoneNumber),
+        escapeCsv(phoneNumber),
         escapeCsv(place.websiteUri ?? ""),
       ];
     });
