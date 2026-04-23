@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     }
 
     const fieldMask =
-      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.websiteUri";
+      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber";
 
     // Perform Places Text Search with pagination (collect all pages)
     const places: any[] = [];
@@ -141,6 +141,8 @@ export async function POST(req: Request) {
           userRatingCount: place.userRatingCount || null,
           types: place.types || [],
           websiteUri: place.websiteUri || null,
+          nationalPhoneNumber: place.nationalPhoneNumber ?? null,
+          internationalPhoneNumber: place.internationalPhoneNumber ?? null,
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }

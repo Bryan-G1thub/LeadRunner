@@ -97,31 +97,28 @@ export async function POST(req: Request) {
       return str;
     };
 
-    // Helper to create Google Search URL from business name
-    const createGoogleSearchUrl = (name: string): string => {
-      if (!name || !name.trim()) return "";
-      // Normalize: trim, remove non-alphanumeric except spaces, then replace spaces with +
-      const normalized = name
-        .trim()
-        .replace(/[^a-zA-Z0-9\s]/g, "")
-        .replace(/\s+/g, "+");
-      return `https://www.google.com/search?q=${normalized}`;
+    /** Google Sheets dialer link; empty if either phone field is missing. */
+    const phoneHyperlinkCsv = (internationalPhoneNumber: unknown, nationalPhoneNumber: unknown): string => {
+      if (internationalPhoneNumber == null || nationalPhoneNumber == null) return "";
+      const intl = String(internationalPhoneNumber).trim();
+      const national = String(nationalPhoneNumber).trim();
+      if (!intl || !national) return "";
+      const telHref = intl.replace(/\s/g, "");
+      const labelForFormula = national.replace(/"/g, '""');
+      const formula = `=HYPERLINK("tel:${telHref}","${labelForFormula}")`;
+      return escapeCsv(formula);
     };
 
-    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "types", "has_website", "googleSearchUrl"];
+    const headers = ["name", "rating", "userRatingCount", "formattedAddress", "nationalPhoneNumber", "websiteUri"];
     const rows = places.map((place) => {
       const name = place.name || "";
-      const types = Array.isArray(place.types) ? place.types.join("; ") : "";
-      const googleSearchUrl = createGoogleSearchUrl(name);
-      const hasWebsite = place.websiteUri && place.websiteUri.trim() !== "" ? "true" : "false";
       return [
         escapeCsv(name),
         escapeCsv(place.rating || ""),
         escapeCsv(place.userRatingCount || ""),
         escapeCsv(place.formattedAddress || ""),
-        escapeCsv(types),
-        escapeCsv(hasWebsite),
-        escapeCsv(googleSearchUrl),
+        phoneHyperlinkCsv(place.internationalPhoneNumber, place.nationalPhoneNumber),
+        escapeCsv(place.websiteUri ?? ""),
       ];
     });
 
