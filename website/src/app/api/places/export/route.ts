@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
-import { lookup } from "node:dns/promises";
 
 type WebsiteClass = "functional" | "one_page" | "facebook" | "broken_domain" | "no_website";
 
@@ -92,7 +91,34 @@ function swapProtocol(url: string): string | null {
   }
 }
 
-async function fetchHealthStatus(url: string): Promise<{ kind: "healthy" | "broken" | "error"; note: string }> {
+type HealthStatusResult =
+  | { kind: "healthy"; note: "" }
+  | { kind: "broken"; note: "HTTP_404" | "HTTP_5XX" }
+  | { kind: "error"; note: "DOMAIN_ERR"; errorCode: string };
+
+function extractErrorCode(err: unknown): string {
+  const fromErr =
+    typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code || "") : "";
+  if (fromErr) return fromErr.toUpperCase();
+
+  const fromCause =
+    typeof err === "object" &&
+    err &&
+    "cause" in err &&
+    typeof (err as { cause?: unknown }).cause === "object" &&
+    (err as { cause?: unknown }).cause &&
+    "code" in ((err as { cause?: { code?: unknown } }).cause as { code?: unknown })
+      ? String(((err as { cause?: { code?: unknown } }).cause as { code?: unknown }).code || "")
+      : "";
+  if (fromCause) return fromCause.toUpperCase();
+
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  if (message.includes("enotfound") || message.includes("name not resolved")) return "ENOTFOUND";
+  if (message.includes("eai_again")) return "EAI_AGAIN";
+  return "UNKNOWN";
+}
+
+async function fetchHealthStatus(url: string): Promise<HealthStatusResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       let response = await fetchWithTimeout(url, "HEAD");
@@ -109,39 +135,29 @@ async function fetchHealthStatus(url: string): Promise<{ kind: "healthy" | "brok
       }
 
       return { kind: "healthy", note: "" };
-    } catch {
+    } catch (err: unknown) {
+      if (attempt === 1) {
+        return {
+          kind: "error",
+          note: "DOMAIN_ERR",
+          errorCode: extractErrorCode(err),
+        };
+      }
       // Retry once on transient network/TLS issues before classifying.
     }
   }
 
-  return { kind: "error", note: "DOMAIN_ERR" };
+  return { kind: "error", note: "DOMAIN_ERR", errorCode: "UNKNOWN" };
 }
 
 async function checkDomainHealth(url: string): Promise<{ isBroken: boolean; note: string }> {
-  let hostname = "";
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return { isBroken: true, note: "DOMAIN_ERR" };
-  }
-
-  // Treat hard DNS failures as a definitive broken domain.
-  try {
-    await lookup(hostname);
-  } catch (err: unknown) {
-    const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
-    if (code === "ENOTFOUND") {
-      return { isBroken: true, note: "DOMAIN_ERR" };
-    }
-    // Other resolver errors can be transient; don't auto-mark as broken.
-  }
-
   const candidateUrls = [url];
   const alternateProtocol = swapProtocol(url);
   if (alternateProtocol && alternateProtocol !== url) {
     candidateUrls.push(alternateProtocol);
   }
 
+  const errorCodes: string[] = [];
   for (const candidate of candidateUrls) {
     const result = await fetchHealthStatus(candidate);
     if (result.kind === "healthy") {
@@ -150,10 +166,19 @@ async function checkDomainHealth(url: string): Promise<{ isBroken: boolean; note
     if (result.kind === "broken") {
       return { isBroken: true, note: result.note };
     }
+    if (result.kind === "error") {
+      errorCodes.push(result.errorCode);
+    }
   }
 
-  // Network-level failures without hard DNS/HTTP evidence are inconclusive;
-  // prefer avoiding false positives over over-flagging.
+  // Only call DOMAIN_ERR when every attempt points to DNS-not-found.
+  const hasOnlyDnsNotFoundErrors =
+    errorCodes.length > 0 && errorCodes.every((code) => code === "ENOTFOUND" || code === "EAI_NONAME");
+  if (hasOnlyDnsNotFoundErrors) {
+    return { isBroken: true, note: "DOMAIN_ERR" };
+  }
+
+  // Inconclusive network/protection failures should not be auto-marked broken.
   return { isBroken: false, note: "" };
 }
 
