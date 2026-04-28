@@ -30,7 +30,7 @@ export default function Home() {
   const [minReviews, setMinReviews] = useState("");
   const [maxReviews, setMaxReviews] = useState("");
   const [filterError, setFilterError] = useState<string | null>(null);
-  const [autoExport, setAutoExport] = useState(false);
+  const [autoExport, setAutoExport] = useState(true);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Validation helpers
