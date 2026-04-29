@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
+import { enrichWebsite, type WebsiteEnrichment } from "@/lib/websiteEnrichment";
 
-type WebsiteClass = "functional" | "one_page" | "facebook" | "broken_domain" | "no_website";
+type WebsiteClass = "agency_site" | "functional" | "one_page" | "facebook" | "broken_domain" | "no_website";
 
 type TriageResult = {
   websiteClass: WebsiteClass;
   triageNote: string;
   normalizedWebsiteUri: string;
+  enrichment: WebsiteEnrichment | null;
 };
 
 type PlaceRecord = {
@@ -20,16 +22,230 @@ type PlaceRecord = {
   internationalPhoneNumber?: string | null;
 };
 
+/** Lower tier number = earlier rows in CSV (more “logical” outreach order). */
 const TRIAGE_SORT_PRIORITY: Record<WebsiteClass, number> = {
-  functional: 0,
-  one_page: 1,
+  no_website: 0,
+  broken_domain: 1,
   facebook: 2,
-  broken_domain: 3,
-  no_website: 4,
+  functional: 3,
+  one_page: 4,
+  agency_site: 5,
 };
 
+const BAD_BUILDER_SET = new Set(["wix", "squarespace", "godaddy_builder", "weebly"]);
+
+function maxCopyrightYear(display: string): number {
+  if (!display) return 0;
+  let maxY = 0;
+  for (const m of display.matchAll(/\b(19|20)\d{2}\b/g)) {
+    const y = parseInt(m[0], 10);
+    if (!Number.isNaN(y)) maxY = Math.max(maxY, y);
+  }
+  return maxY;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
 const REQUEST_TIMEOUT_MS = 10000;
-const ONE_PAGE_INTERNAL_LINK_THRESHOLD = 1;
+const EXPORT_ENRICH_CONCURRENCY = 6;
+
+function parsePageCountEstimate(value: string): number {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return 0;
+  const plusMatch = trimmed.match(/^(\d+)\+$/);
+  if (plusMatch) return parseInt(plusMatch[1], 10) || 0;
+  const direct = parseInt(trimmed, 10);
+  return Number.isNaN(direct) ? 0 : direct;
+}
+
+function isRecentIsoDate(value: string, daysWindow: number): boolean {
+  if (!value) return false;
+  const ts = Date.parse(value);
+  if (Number.isNaN(ts)) return false;
+  const msWindow = daysWindow * 24 * 60 * 60 * 1000;
+  return Date.now() - ts <= msWindow;
+}
+
+function getWebsiteClassForExport(triage: TriageResult): string {
+  const enrichment = triage.enrichment;
+  if (!enrichment) return triage.websiteClass;
+
+  const builder = (enrichment.builderDetected || "").toLowerCase();
+  if (builder === "wix") return "wix";
+  if (builder === "wordpress") return "wordpress";
+  if (builder) return builder;
+
+  const techSignals = (enrichment.techSignals || "").toLowerCase();
+  if (techSignals.split("|").includes("wordpress")) return "wordpress";
+
+  return triage.websiteClass;
+}
+
+/** Sub-score added within tier; lower = earlier. */
+function functionalHeuristicSubscore(e: WebsiteEnrichment): number {
+  let h = 0;
+  const b = (e.builderDetected || "").toLowerCase();
+  const maxY = maxCopyrightYear(e.copyrightYear);
+  const currentYear = new Date().getFullYear();
+  const pages = parsePageCountEstimate(e.pageCountEstimate);
+  const navPaths = e.internalPathCount ?? 0;
+  const noParsedCopyright = !e.copyrightYear?.trim();
+
+  if (BAD_BUILDER_SET.has(b)) {
+    h += 220;
+    if (e.copyrightOldFlag === "yes") h += 140;
+    if (maxY > 0 && maxY < currentYear - 3) h += 120;
+  } else {
+    if (e.copyrightOldFlag === "yes") h -= 90;
+    if (maxY > 0 && maxY <= 2018) h -= 50;
+    // Current (or future) year in footer ≈ actively maintained — deprioritize hard vs dusty sites.
+    if (maxY >= currentYear) {
+      h += 480;
+      if (pages >= 50) h += 140;
+    } else if (maxY === currentYear - 1) {
+      h += 240;
+      if (pages >= 50) h += 80;
+    } else if (maxY === currentYear - 2) {
+      h += 110;
+    }
+  }
+
+  // Tiny brochure sites (real 3–6 pages) → better leads; rise vs mega-menus / huge sitemaps.
+  if (pages >= 1 && pages <= 6) h -= 105;
+  if (pages >= 30 || navPaths >= 24) h += 100;
+  if (noParsedCopyright && (pages >= 18 || navPaths >= 20)) h += 95;
+
+  if (e.hasCaptcha) h += 40;
+  if (pages === 0) h += 30;
+
+  return clamp(h, -420, 2600);
+}
+
+function onePageHeuristicSubscore(e: WebsiteEnrichment): number {
+  let h = 50;
+  const b = (e.builderDetected || "").toLowerCase();
+  const maxY = maxCopyrightYear(e.copyrightYear);
+  const currentYear = new Date().getFullYear();
+  if (BAD_BUILDER_SET.has(b)) {
+    h += 180;
+    if (e.copyrightOldFlag === "yes") h += 100;
+    if (maxY > 0 && maxY < currentYear - 3) h += 80;
+  } else if (maxY >= currentYear) {
+    h += 320;
+  } else if (maxY === currentYear - 1) {
+    h += 160;
+  }
+  if (e.hasCaptcha) h += 25;
+  return clamp(h, 0, 1200);
+}
+
+function agencyHeuristicSubscore(_triage: TriageResult, e: WebsiteEnrichment): number {
+  let h = 0;
+  const currentYear = new Date().getFullYear();
+  const maxY = maxCopyrightYear(e.copyrightYear);
+
+  const hasCurrentYearCopyright = e.copyrightYear
+    .split("-")
+    .some((part) => parseInt(part.trim(), 10) === currentYear);
+  if (hasCurrentYearCopyright && isRecentIsoDate(e.lastModified, 180)) {
+    h += 120;
+  }
+
+  // Aging footer (e.g. ©2020) = better lead among agency rows; rises within the agency band.
+  if (maxY > 0 && maxY <= currentYear - 6) {
+    h -= 520;
+  } else if (maxY > 0 && maxY <= currentYear - 4) {
+    h -= 380;
+  } else if (maxY > 0 && maxY <= currentYear - 2) {
+    h -= 220;
+  }
+
+  return h;
+}
+
+const TIER_SORT_SPAN = 10_000;
+
+function isWordPressEnrichment(e: WebsiteEnrichment): boolean {
+  const b = (e.builderDetected || "").toLowerCase();
+  const tech = (e.techSignals || "").toLowerCase();
+  return b === "wordpress" || tech.split("|").includes("wordpress");
+}
+
+/** WP + almost no static nav links + recent homepage Last-Modified + no parsed © often means JS footer (e.g. current year). */
+function footerFreshHeuristic(e: WebsiteEnrichment | null): boolean {
+  if (!e || e.copyrightYear?.trim()) return false;
+  if (e.enrichStatus !== "ok" || !isWordPressEnrichment(e)) return false;
+  if (!isRecentIsoDate(e.lastModified, 100)) return false;
+  const pc = parsePageCountEstimate(e.pageCountEstimate || "");
+  return e.internalPathCount <= 4 && pc <= 15;
+}
+
+/** Parsed © / copyright text includes this calendar year or later. */
+function footerCurrentYearParsed(e: WebsiteEnrichment | null): boolean {
+  if (!e?.copyrightYear?.trim()) return false;
+  const maxY = maxCopyrightYear(e.copyrightYear);
+  if (maxY <= 0) return false;
+  return maxY >= new Date().getFullYear();
+}
+
+/** Footer shows this year or later → always last rows in CSV (after everyone else). */
+function hasFooterCurrentOrFutureYear(e: WebsiteEnrichment | null): boolean {
+  return footerCurrentYearParsed(e) || footerFreshHeuristic(e);
+}
+
+function computeLeadSortScore(row: { triage: TriageResult; rank: number }): number {
+  const { triage } = row;
+  const enrichment = triage.enrichment;
+  const tier = TRIAGE_SORT_PRIORITY[triage.websiteClass] ?? 99;
+  let score = tier * TIER_SORT_SPAN;
+
+  if (!enrichment) {
+    return score + (row.rank ?? 0) * 1e-6;
+  }
+
+  let within = 500;
+  if (triage.websiteClass === "functional") {
+    within = 1000 + functionalHeuristicSubscore(enrichment);
+  } else if (triage.websiteClass === "one_page") {
+    within = 1000 + onePageHeuristicSubscore(enrichment);
+  } else if (triage.websiteClass === "agency_site") {
+    within = 1000 + agencyHeuristicSubscore(triage, enrichment);
+  }
+
+  score += clamp(within, 0, TIER_SORT_SPAN - 1);
+  return score + (row.rank ?? 0) * 1e-6;
+}
+
+function buildNoteByComputer(triage: TriageResult): string {
+  const notes: string[] = [];
+  const displayClass = getWebsiteClassForExport(triage);
+  notes.push(`class=${displayClass}`);
+
+  if (triage.triageNote) {
+    notes.push(`triage=${triage.triageNote}`);
+  }
+
+  const e = triage.enrichment;
+  if (!e) return notes.join(" | ");
+
+  if (e.copyrightYear) notes.push(`copyright=${e.copyrightYear}`);
+  if (e.copyrightOldFlag) notes.push(`copyrightOld=${e.copyrightOldFlag}`);
+  if (e.builderDetected) notes.push(`builder=${e.builderDetected}`);
+  if (e.agencyCredit && e.agencyCredit !== "no") notes.push(`agencyCredit=${e.agencyCredit}`);
+  if (e.pageCountEstimate) notes.push(`pageCount=${e.pageCountEstimate}`);
+  notes.push(`captcha=${e.hasCaptcha ? "yes" : "no"}`);
+  if (e.enrichStatus) notes.push(`enrich=${e.enrichStatus}`);
+  if (hasFooterCurrentOrFutureYear(e)) {
+    notes.push("sortBucket=footer_current_year_last");
+    if (footerFreshHeuristic(e)) {
+      notes.push("footerYear=guess_dynamic_wp");
+    }
+  }
+
+  return notes.join(" | ");
+}
 
 function normalizeWebsiteUri(input: unknown): string {
   const raw = typeof input === "string" ? input.trim() : "";
@@ -46,14 +262,55 @@ function getHostname(url: string): string {
   }
 }
 
-function isFacebookHostname(hostname: string): boolean {
-  return (
-    hostname === "facebook.com" ||
-    hostname === "www.facebook.com" ||
-    hostname === "m.facebook.com" ||
-    hostname.endsWith(".facebook.com") ||
-    hostname === "fb.me"
-  );
+function hostnameEndsWithDomain(hostname: string, domain: string): boolean {
+  const h = hostname.toLowerCase();
+  const d = domain.toLowerCase();
+  return h === d || h.endsWith(`.${d}`);
+}
+
+/** Same export tier as Facebook: directory / social profile, not the business’s own site. */
+function listingProfileTriageNote(normalizedUri: string): string | null {
+  let host: string;
+  let pathname = "/";
+  try {
+    const u = new URL(normalizedUri);
+    host = u.hostname.toLowerCase();
+    pathname = u.pathname || "/";
+  } catch {
+    return null;
+  }
+
+  if (
+    hostnameEndsWithDomain(host, "facebook.com") ||
+    host === "fb.me" ||
+    hostnameEndsWithDomain(host, "fb.com")
+  ) {
+    return "FB";
+  }
+  if (hostnameEndsWithDomain(host, "instagram.com")) return "IG";
+  if (hostnameEndsWithDomain(host, "mapquest.com")) return "MAPQUEST";
+  if (hostnameEndsWithDomain(host, "yelp.com")) return "YELP";
+  if (hostnameEndsWithDomain(host, "yellowpages.com")) return "YELLOWPAGES";
+  if (hostnameEndsWithDomain(host, "superpages.com")) return "SUPERPAGES";
+  if (hostnameEndsWithDomain(host, "dexknows.com")) return "DEXKNOWS";
+  if (hostnameEndsWithDomain(host, "bbb.org")) return "BBB";
+  if (hostnameEndsWithDomain(host, "manta.com")) return "MANTA";
+  if (hostnameEndsWithDomain(host, "angi.com")) return "ANGI";
+  if (hostnameEndsWithDomain(host, "homeadvisor.com")) return "HOMEADVISOR";
+  if (hostnameEndsWithDomain(host, "thumbtack.com")) return "THUMBTACK";
+  if (hostnameEndsWithDomain(host, "houzz.com")) return "HOUZZ";
+  if (hostnameEndsWithDomain(host, "nextdoor.com")) return "NEXTDOOR";
+  if (hostnameEndsWithDomain(host, "foursquare.com")) return "FOURSQUARE";
+  if (hostnameEndsWithDomain(host, "tripadvisor.com")) return "TRIPADVISOR";
+  if (hostnameEndsWithDomain(host, "linkedin.com")) return "LINKEDIN";
+  if (hostnameEndsWithDomain(host, "apple.com") && pathname.includes("/maps/")) return "APPLE_MAPS";
+  if (host === "maps.google.com") return "GMAPS";
+  if ((host === "www.google.com" || host === "google.com") && pathname.startsWith("/maps")) return "GMAPS";
+  if (hostnameEndsWithDomain(host, "g.page")) return "GBUSINESS";
+  if (hostnameEndsWithDomain(host, "business.site")) return "GBUSINESS";
+  if (hostnameEndsWithDomain(host, "dot-services.org")) return "DOT_SERVICES";
+
+  return null;
 }
 
 async function fetchWithTimeout(url: string, method: "HEAD" | "GET"): Promise<Response> {
@@ -171,74 +428,34 @@ async function checkDomainHealth(url: string): Promise<{ isBroken: boolean; note
     }
   }
 
-  // Only call DOMAIN_ERR when every attempt points to DNS-not-found.
-  const hasOnlyDnsNotFoundErrors =
-    errorCodes.length > 0 && errorCodes.every((code) => code === "ENOTFOUND" || code === "EAI_NONAME");
-  if (hasOnlyDnsNotFoundErrors) {
-    return { isBroken: true, note: "DOMAIN_ERR" };
-  }
+  // DOMAIN_ERR auto-flagging is intentionally disabled due to high false-positive risk.
+  // We only mark broken_domain on explicit HTTP evidence (404/410/5xx).
 
   // Inconclusive network/protection failures should not be auto-marked broken.
   return { isBroken: false, note: "" };
 }
 
-function countInternalNavigationLinks(html: string, baseUrl: string): number {
-  let base: URL;
-  try {
-    base = new URL(baseUrl);
-  } catch {
-    return 0;
-  }
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
 
-  const hrefRegex = /href\s*=\s*["']([^"'#]+)["']/gi;
-  const paths = new Set<string>();
-
-  let match: RegExpExecArray | null;
-  while ((match = hrefRegex.exec(html)) !== null) {
-    const href = (match[1] || "").trim();
-    if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
-      continue;
-    }
-
-    try {
-      const resolved = new URL(href, base);
-      if (resolved.hostname.toLowerCase() !== base.hostname.toLowerCase()) continue;
-      if (!["http:", "https:"].includes(resolved.protocol)) continue;
-
-      const normalizedPath = resolved.pathname.replace(/\/+$/, "") || "/";
-      const looksLikeAsset = /\.(css|js|png|jpg|jpeg|gif|svg|webp|ico|pdf|xml|txt|woff2?|ttf|eot)$/i.test(
-        normalizedPath
-      );
-      if (looksLikeAsset) continue;
-
-      paths.add(normalizedPath);
-    } catch {
-      continue;
+  async function worker() {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i], i);
     }
   }
 
-  return paths.size;
-}
-
-async function detectOnePageSite(url: string): Promise<boolean> {
-  try {
-    const response = await fetchWithTimeout(url, "GET");
-    if (!response.ok) return false;
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().includes("text/html")) return false;
-
-    const html = await response.text();
-    const internalLinkCount = countInternalNavigationLinks(html, response.url || url);
-    return internalLinkCount <= ONE_PAGE_INTERNAL_LINK_THRESHOLD;
-  } catch {
-    return false;
-  }
+  const n = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
 }
 
 async function classifyWebsite(
   websiteUri: unknown,
-  hostHealthCache: Map<string, Promise<{ isBroken: boolean; note: string }>>
+  hostHealthCache: Map<string, Promise<{ isBroken: boolean; note: string }>>,
+  enrichCache: Map<string, Promise<WebsiteEnrichment>>
 ): Promise<TriageResult> {
   const normalizedWebsiteUri = normalizeWebsiteUri(websiteUri);
   if (!normalizedWebsiteUri) {
@@ -246,15 +463,18 @@ async function classifyWebsite(
       websiteClass: "no_website",
       triageNote: "NO_SITE",
       normalizedWebsiteUri,
+      enrichment: null,
     };
   }
 
   const hostname = getHostname(normalizedWebsiteUri);
-  if (hostname && isFacebookHostname(hostname)) {
+  const listingNote = listingProfileTriageNote(normalizedWebsiteUri);
+  if (listingNote) {
     return {
       websiteClass: "facebook",
-      triageNote: "FB",
+      triageNote: listingNote,
       normalizedWebsiteUri,
+      enrichment: null,
     };
   }
 
@@ -269,15 +489,31 @@ async function classifyWebsite(
       websiteClass: "broken_domain",
       triageNote: health.note || "DOMAIN_ERR",
       normalizedWebsiteUri,
+      enrichment: null,
     };
   }
 
-  const isOnePage = await detectOnePageSite(normalizedWebsiteUri);
-  if (isOnePage) {
+  const enrichKey = hostname || normalizedWebsiteUri;
+  if (!enrichCache.has(enrichKey)) {
+    enrichCache.set(enrichKey, enrichWebsite(normalizedWebsiteUri));
+  }
+  const enrichment = await enrichCache.get(enrichKey)!;
+
+  if (enrichment.hasAgencyCredit) {
+    return {
+      websiteClass: "agency_site",
+      triageNote: "AGENCY",
+      normalizedWebsiteUri,
+      enrichment,
+    };
+  }
+
+  if (enrichment.onePageHint) {
     return {
       websiteClass: "one_page",
       triageNote: "ONE_PAGE",
       normalizedWebsiteUri,
+      enrichment,
     };
   }
 
@@ -285,6 +521,7 @@ async function classifyWebsite(
     websiteClass: "functional",
     triageNote: "",
     normalizedWebsiteUri,
+    enrichment,
   };
 }
 
@@ -361,17 +598,27 @@ export async function POST(req: Request) {
     }
 
     const hostHealthCache = new Map<string, Promise<{ isBroken: boolean; note: string }>>();
-    const triagedRows = await Promise.all(
-      placesWithRank.map(async ({ place, rank }) => {
-        const triage = await classifyWebsite(place.websiteUri, hostHealthCache);
-        return { place, rank, triage };
-      })
-    );
+    const enrichCache = new Map<string, Promise<WebsiteEnrichment>>();
+
+    const triagedRows = await mapPool(placesWithRank, EXPORT_ENRICH_CONCURRENCY, async ({ place, rank }) => {
+      const triage = await classifyWebsite(place.websiteUri, hostHealthCache, enrichCache);
+      return { place, rank, triage };
+    });
 
     triagedRows.sort((a, b) => {
-      const aPriority = TRIAGE_SORT_PRIORITY[a.triage.websiteClass];
-      const bPriority = TRIAGE_SORT_PRIORITY[b.triage.websiteClass];
-      if (aPriority !== bPriority) return aPriority - bPriority;
+      const aFresh = hasFooterCurrentOrFutureYear(a.triage.enrichment);
+      const bFresh = hasFooterCurrentOrFutureYear(b.triage.enrichment);
+      if (aFresh !== bFresh) return aFresh ? 1 : -1;
+
+      const aScore = computeLeadSortScore(a);
+      const bScore = computeLeadSortScore(b);
+      if (aScore !== bScore) return aScore - bScore;
+
+      const aPageCount = parsePageCountEstimate(a.triage.enrichment?.pageCountEstimate || "");
+      const bPageCount = parsePageCountEstimate(b.triage.enrichment?.pageCountEstimate || "");
+      if (aPageCount === 0 && bPageCount !== 0) return 1;
+      if (bPageCount === 0 && aPageCount !== 0) return -1;
+
       return (a.rank ?? 0) - (b.rank ?? 0);
     });
 
@@ -392,9 +639,9 @@ export async function POST(req: Request) {
       "formattedAddress",
       "phoneNumber",
       "websiteUri",
-      "websiteClass",
-      "triageNote",
+      "noteByComputer",
     ];
+
     const rows = triagedRows.map(({ place, triage }) => {
       const name = place.name || "";
       const phoneNumber = place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? "";
@@ -405,8 +652,7 @@ export async function POST(req: Request) {
         escapeCsv(place.formattedAddress || ""),
         escapeCsv(phoneNumber),
         escapeCsv(triage.normalizedWebsiteUri),
-        escapeCsv(triage.websiteClass),
-        escapeCsv(triage.triageNote),
+        escapeCsv(buildNoteByComputer(triage)),
       ];
     });
 
