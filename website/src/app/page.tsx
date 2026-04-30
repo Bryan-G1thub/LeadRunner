@@ -2,6 +2,19 @@
 
 import { useState, useEffect } from "react";
 
+type SearchPreset = {
+  name: string;
+  query: string;
+  zipOrCity: string;
+  radiusMeters: string;
+  minRating: string;
+  minReviews: string;
+  maxReviews: string;
+  autoExport: boolean;
+};
+
+const SEARCH_PRESETS_STORAGE_KEY = "lead_runner_search_presets_v1";
+
 export default function Home() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
@@ -32,6 +45,9 @@ export default function Home() {
   const [filterError, setFilterError] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState(true);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [presets, setPresets] = useState<SearchPreset[]>([]);
+  const [selectedPresetName, setSelectedPresetName] = useState("");
+  const [presetNameInput, setPresetNameInput] = useState("");
 
   // Validation helpers
   const validateQuery = (value: string): string | null => {
@@ -145,12 +161,115 @@ export default function Home() {
     setRunCompleted(false);
   };
 
+  const buildCurrentPreset = (name: string): SearchPreset => ({
+    name: name.trim(),
+    query,
+    zipOrCity,
+    radiusMeters,
+    minRating,
+    minReviews,
+    maxReviews,
+    autoExport,
+  });
+
+  const persistPresets = (nextPresets: SearchPreset[]) => {
+    setPresets(nextPresets);
+    localStorage.setItem(SEARCH_PRESETS_STORAGE_KEY, JSON.stringify(nextPresets));
+  };
+
+  const clearRunUiState = () => {
+    setRunId(null);
+    setSearchedCount(null);
+    setTotalFetched(null);
+    setRunCompleted(false);
+    setBatchProgress(null);
+    setStatusMessage(null);
+    setFormattedAddress(null);
+    setError(null);
+    setQueryError(null);
+    setZipOrCityError(null);
+    setRadiusError(null);
+    setFilterError(null);
+  };
+
+  const handleSavePreset = () => {
+    const name = presetNameInput.trim();
+    if (!name) {
+      setError("Preset name is required");
+      return;
+    }
+
+    const next = [...presets];
+    const idx = next.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+    const preset = buildCurrentPreset(name);
+    if (idx >= 0) {
+      next[idx] = preset;
+    } else {
+      next.unshift(preset);
+    }
+    persistPresets(next);
+    setSelectedPresetName(name);
+    setPresetNameInput(name);
+    setError(null);
+  };
+
+  const handleLoadPreset = (name: string) => {
+    const preset = presets.find((p) => p.name === name);
+    if (!preset) return;
+    setQuery(preset.query);
+    setZipOrCity(preset.zipOrCity);
+    setRadiusMeters(preset.radiusMeters);
+    setMinRating(preset.minRating);
+    setMinReviews(preset.minReviews);
+    setMaxReviews(preset.maxReviews);
+    setAutoExport(preset.autoExport);
+    setSelectedPresetName(preset.name);
+    setPresetNameInput(preset.name);
+    clearRunUiState();
+  };
+
+  const handleDeletePreset = () => {
+    if (!selectedPresetName) return;
+    const next = presets.filter((p) => p.name !== selectedPresetName);
+    persistPresets(next);
+    setSelectedPresetName("");
+    setPresetNameInput("");
+    setError(null);
+  };
+
   // Check authentication on mount
   useEffect(() => {
     const isAuthenticated = localStorage.getItem("app_authenticated") === "true";
     setAuthenticated(isAuthenticated);
     setCheckingAuth(false);
   }, []);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    try {
+      const raw = localStorage.getItem(SEARCH_PRESETS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+
+      const safePresets: SearchPreset[] = parsed
+        .filter((p: any) => p && typeof p.name === "string" && p.name.trim())
+        .map((p: any) => ({
+          name: p.name.trim(),
+          query: typeof p.query === "string" ? p.query : "",
+          zipOrCity: typeof p.zipOrCity === "string" ? p.zipOrCity : "",
+          radiusMeters: typeof p.radiusMeters === "string" ? p.radiusMeters : "",
+          minRating: typeof p.minRating === "string" ? p.minRating : "",
+          minReviews: typeof p.minReviews === "string" ? p.minReviews : "",
+          maxReviews: typeof p.maxReviews === "string" ? p.maxReviews : "",
+          autoExport: typeof p.autoExport === "boolean" ? p.autoExport : true,
+        }));
+
+      setPresets(safePresets);
+    } catch (e) {
+      console.error("Failed to load presets:", e);
+    }
+  }, [authenticated]);
 
   // Fetch history when authenticated
   useEffect(() => {
@@ -630,6 +749,63 @@ export default function Home() {
         <div className="bg-white rounded-xl shadow-xl p-8 mb-6 border border-[#2a6f8f]/10">
           <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: "#0A1628" }}>Stonebrook Lead Runner</h1>
           <p className="text-sm mb-6" style={{ color: "#64748b" }}>Search → Export in one click</p>
+
+        <div className="mb-6 p-4 rounded-lg border border-[#e2e8f0]" style={{ backgroundColor: "#f8fafc" }}>
+          <div className="flex flex-col md:flex-row gap-3 md:items-end">
+            <div className="md:w-1/3">
+              <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Load preset</label>
+              <select
+                value={selectedPresetName}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setSelectedPresetName(name);
+                  if (name) handleLoadPreset(name);
+                }}
+                className="w-full px-3 py-2.5 bg-white text-[#0A1628] border border-[#2a6f8f]/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent"
+              >
+                <option value="">Select preset...</option>
+                {presets.map((preset) => (
+                  <option key={preset.name} value={preset.name}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:w-1/3">
+              <label className="block text-sm font-medium mb-1" style={{ color: "#0A1628" }}>Preset name</label>
+              <input
+                type="text"
+                value={presetNameInput}
+                onChange={(e) => setPresetNameInput(e.target.value)}
+                className="w-full px-3 py-2.5 bg-white text-[#0A1628] border border-[#2a6f8f]/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#14a5aa] focus:border-transparent"
+                placeholder="e.g. Florida moving coords"
+                maxLength={60}
+              />
+            </div>
+            <div className="md:w-1/3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleSavePreset}
+                className="flex-1 px-4 py-2.5 text-white rounded-lg font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: "#2a6f8f" }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={handleDeletePreset}
+                disabled={!selectedPresetName}
+                className="flex-1 px-4 py-2.5 rounded-lg font-medium border border-[#e2e8f0] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ color: "#64748b", backgroundColor: "#fff" }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          <p className="text-xs mt-2" style={{ color: "#64748b" }}>
+            Saves query, locations/coords, radius, filters, and auto-export toggle.
+          </p>
+        </div>
 
         <div className="space-y-4 mb-6">
           <div>

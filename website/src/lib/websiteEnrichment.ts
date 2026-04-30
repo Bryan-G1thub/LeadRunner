@@ -22,6 +22,8 @@ export type WebsiteEnrichment = {
   captchaSignals: string;
   /** Internal paths from homepage hrefs (same host), for one-page fallback */
   internalPathCount: number;
+  /** Same-host paths from header / top-nav slice only (polished sites tend to have more). */
+  headerNavPathCount: number;
   /** True if sitemap says 1 URL or internalPathCount <= 1 when no sitemap */
   onePageHint: boolean;
 };
@@ -142,6 +144,35 @@ function countInternalPaths(html: string, baseUrl: string): number {
     }
   }
   return paths.size;
+}
+
+/** Best-effort slice where primary nav / header links usually live (not whole page). */
+function sliceHeaderNavigationHtml(html: string): string {
+  const lower = html.toLowerCase();
+  let start = lower.indexOf("<header");
+  if (start !== -1) {
+    const end = lower.indexOf("</header>", start);
+    return end === -1 ? html.slice(start, start + 90_000) : html.slice(start, end + 9);
+  }
+  const branded = lower.search(
+    /<[^>]{1,500}(?:class|id)\s*=\s*["'][^"']*(?:site-header|main-header|top-header|page-header|navbar|masthead|primary-nav|desktop-nav)/i
+  );
+  if (branded >= 0) {
+    return html.slice(branded, Math.min(html.length, branded + 55_000));
+  }
+  const bannerRole = lower.search(/role\s*=\s*["']banner["']/i);
+  if (bannerRole >= 0) {
+    const back = Math.max(0, bannerRole - 3_000);
+    return html.slice(back, Math.min(html.length, bannerRole + 45_000));
+  }
+  start = lower.indexOf("<nav");
+  if (start !== -1) {
+    const end = lower.indexOf("</nav>", start);
+    return end === -1 ? html.slice(start, start + 42_000) : html.slice(start, end + 6);
+  }
+  const body = lower.indexOf("<body");
+  const from = body === -1 ? 0 : body;
+  return html.slice(from, Math.min(html.length, from + 36_000));
 }
 
 function copyrightYearPlausible(y: number): boolean {
@@ -388,6 +419,17 @@ async function tryCountUrlsFromSitemap(
   return countLocInSitemap(text);
 }
 
+/** Google returns 200 + login HTML for Sites/Docs links that are not public — do not treat as a real homepage. */
+function htmlLooksLikeGoogleAccountWall(html: string): boolean {
+  const h = html.slice(0, 220_000).toLowerCase();
+  if (h.includes("accounts.google.com")) return true;
+  if (h.includes("consent.google.com")) return true;
+  if (h.includes("use your google account")) return true;
+  if (h.includes("sign in") && h.includes("google accounts")) return true;
+  if (h.includes("sign in") && h.includes("google account") && h.includes("forgot email")) return true;
+  return false;
+}
+
 export async function enrichWebsite(startUrl: string): Promise<WebsiteEnrichment> {
   const empty = (): WebsiteEnrichment => ({
     enrichStatus: "skipped",
@@ -403,6 +445,7 @@ export async function enrichWebsite(startUrl: string): Promise<WebsiteEnrichment
     hasCaptcha: false,
     captchaSignals: "",
     internalPathCount: 0,
+    headerNavPathCount: 0,
     onePageHint: false,
   });
 
@@ -431,6 +474,27 @@ export async function enrichWebsite(startUrl: string): Promise<WebsiteEnrichment
     }
 
     const html = home.text;
+    if (htmlLooksLikeGoogleAccountWall(html)) {
+      clearTimeout(deadline);
+      return {
+        enrichStatus: "skipped",
+        copyrightYear: "",
+        copyrightOldFlag: "",
+        builderDetected: "",
+        agencyCredit: "no",
+        hasAgencyCredit: false,
+        pageCountSource: "unknown",
+        pageCountEstimate: "",
+        lastModified: parseLastModifiedToIso(home.lastModified),
+        techSignals: "google_sign_in_wall",
+        hasCaptcha: false,
+        captchaSignals: "",
+        internalPathCount: 0,
+        headerNavPathCount: 0,
+        onePageHint: false,
+      };
+    }
+
     const finalBase = home.finalUrl || homepageUrl;
     const copyright = extractCopyrightDisplay(html);
     const builder = detectBuilder(html);
@@ -438,6 +502,7 @@ export async function enrichWebsite(startUrl: string): Promise<WebsiteEnrichment
     const captchaSignals = detectCaptchaSignals(html);
     const agency = detectAgencyCredit(html);
     const internalPathCount = countInternalPaths(html, finalBase);
+    const headerNavPathCount = countInternalPaths(sliceHeaderNavigationHtml(html), finalBase);
 
     let pageCountSource: PageCountSource = "unknown";
     let pageCountEstimate = "";
@@ -529,6 +594,7 @@ export async function enrichWebsite(startUrl: string): Promise<WebsiteEnrichment
       hasCaptcha: captchaSignals.length > 0,
       captchaSignals: captchaSignals.join("|"),
       internalPathCount,
+      headerNavPathCount,
       onePageHint,
     };
   } catch {

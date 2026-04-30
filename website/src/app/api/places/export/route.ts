@@ -32,7 +32,8 @@ const TRIAGE_SORT_PRIORITY: Record<WebsiteClass, number> = {
   agency_site: 5,
 };
 
-const BAD_BUILDER_SET = new Set(["wix", "squarespace", "godaddy_builder", "weebly"]);
+/** Wix / DIY builders only — not Squarepress/WordPress (many legit nice sites use those). */
+const BAD_BUILDER_SET = new Set(["wix", "godaddy_builder", "weebly"]);
 
 function maxCopyrightYear(display: string): number {
   if (!display) return 0;
@@ -91,12 +92,14 @@ function functionalHeuristicSubscore(e: WebsiteEnrichment): number {
   const currentYear = new Date().getFullYear();
   const pages = parsePageCountEstimate(e.pageCountEstimate);
   const navPaths = e.internalPathCount ?? 0;
+  const headerLinks = e.headerNavPathCount ?? 0;
   const noParsedCopyright = !e.copyrightYear?.trim();
 
   if (BAD_BUILDER_SET.has(b)) {
-    h += 220;
-    if (e.copyrightOldFlag === "yes") h += 140;
-    if (maxY > 0 && maxY < currentYear - 3) h += 120;
+    // DIY/bad builders are prime upgrade leads: move them UP.
+    h -= 220;
+    if (e.copyrightOldFlag === "yes") h -= 140;
+    if (maxY > 0 && maxY < currentYear - 3) h -= 120;
   } else {
     if (e.copyrightOldFlag === "yes") h -= 90;
     if (maxY > 0 && maxY <= 2018) h -= 50;
@@ -116,6 +119,14 @@ function functionalHeuristicSubscore(e: WebsiteEnrichment): number {
   if (pages >= 1 && pages <= 6) h -= 105;
   if (pages >= 30 || navPaths >= 24) h += 100;
   if (noParsedCopyright && (pages >= 18 || navPaths >= 20)) h += 95;
+  // “Established” brochure: enough URLs + enough homepage nav paths (town lists, mega-menus) → sink vs dusty micro-sites.
+  if (pages >= 7 && pages <= 55 && navPaths >= 12) h += 60;
+  if (navPaths >= 20 && pages >= 5) h += 50;
+  // More distinct links in header / primary nav → more “built-out” site → sink vs crusty micro-sites.
+  if (headerLinks >= 9) h += 95;
+  else if (headerLinks >= 7) h += 72;
+  else if (headerLinks >= 5) h += 48;
+  else if (headerLinks >= 4) h += 26;
 
   if (e.hasCaptcha) h += 40;
   if (pages === 0) h += 30;
@@ -129,9 +140,10 @@ function onePageHeuristicSubscore(e: WebsiteEnrichment): number {
   const maxY = maxCopyrightYear(e.copyrightYear);
   const currentYear = new Date().getFullYear();
   if (BAD_BUILDER_SET.has(b)) {
-    h += 180;
-    if (e.copyrightOldFlag === "yes") h += 100;
-    if (maxY > 0 && maxY < currentYear - 3) h += 80;
+    // One-page + DIY/bad builder is also a strong lead signal.
+    h -= 180;
+    if (e.copyrightOldFlag === "yes") h -= 100;
+    if (maxY > 0 && maxY < currentYear - 3) h -= 80;
   } else if (maxY >= currentYear) {
     h += 320;
   } else if (maxY === currentYear - 1) {
@@ -139,6 +151,39 @@ function onePageHeuristicSubscore(e: WebsiteEnrichment): number {
   }
   if (e.hasCaptcha) h += 25;
   return clamp(h, 0, 1200);
+}
+
+/** Agency credit + “built” + fresh signals → sink to bottom of agency band (old © sites stay mostly unscathed). */
+function agencyPolishedSink(e: WebsiteEnrichment): number {
+  if (!e.hasAgencyCredit) return 0;
+  const pages = parsePageCountEstimate(e.pageCountEstimate || "");
+  const hdr = e.headerNavPathCount ?? 0;
+  const nav = e.internalPathCount ?? 0;
+  const maxY = maxCopyrightYear(e.copyrightYear || "");
+  const cy = new Date().getFullYear();
+  const recentHome = isRecentIsoDate(e.lastModified, 150);
+  const staleFooter = maxY > 0 && maxY <= cy - 7;
+
+  const builtOut =
+    pages >= 16 || (hdr >= 5 && pages >= 8) || (nav >= 22 && pages >= 9) || (hdr >= 7 && pages >= 6);
+  const footerVeryFresh = maxY >= cy;
+  const footerRecent = maxY >= cy - 1;
+
+  if (staleFooter) {
+    let t = 0;
+    if (builtOut && pages >= 22 && (hdr >= 6 || nav >= 24)) t += 140;
+    return Math.min(t, 500);
+  }
+
+  let s = 0;
+  if (footerVeryFresh && recentHome) s += 720;
+  if (footerRecent && recentHome && builtOut) s += 520;
+  if (builtOut && hdr >= 6) s += 480;
+  if (builtOut && pages >= 14) s += 420;
+  if (e.hasCaptcha && pages >= 10 && hdr >= 4) s += 260;
+  if (!e.copyrightYear?.trim() && recentHome && builtOut && hdr >= 5) s += 360;
+
+  return Math.min(s, 8200);
 }
 
 function agencyHeuristicSubscore(_triage: TriageResult, e: WebsiteEnrichment): number {
@@ -162,21 +207,17 @@ function agencyHeuristicSubscore(_triage: TriageResult, e: WebsiteEnrichment): n
     h -= 220;
   }
 
+  h += agencyPolishedSink(e);
+
   return h;
 }
 
 const TIER_SORT_SPAN = 10_000;
 
-function isWordPressEnrichment(e: WebsiteEnrichment): boolean {
-  const b = (e.builderDetected || "").toLowerCase();
-  const tech = (e.techSignals || "").toLowerCase();
-  return b === "wordpress" || tech.split("|").includes("wordpress");
-}
-
-/** WP + almost no static nav links + recent homepage Last-Modified + no parsed © often means JS footer (e.g. current year). */
+/** Almost no static nav + recent homepage Last-Modified + no parsed © often means JS footer (e.g. current year). */
 function footerFreshHeuristic(e: WebsiteEnrichment | null): boolean {
   if (!e || e.copyrightYear?.trim()) return false;
-  if (e.enrichStatus !== "ok" || !isWordPressEnrichment(e)) return false;
+  if (e.enrichStatus !== "ok") return false;
   if (!isRecentIsoDate(e.lastModified, 100)) return false;
   const pc = parsePageCountEstimate(e.pageCountEstimate || "");
   return e.internalPathCount <= 4 && pc <= 15;
@@ -193,6 +234,19 @@ function footerCurrentYearParsed(e: WebsiteEnrichment | null): boolean {
 /** Footer shows this year or later → always last rows in CSV (after everyone else). */
 function hasFooterCurrentOrFutureYear(e: WebsiteEnrichment | null): boolean {
   return footerCurrentYearParsed(e) || footerFreshHeuristic(e);
+}
+
+/** Google login / Google Sites host — useless as a “real” website; always after normal rows and after footer-current-year rows. */
+function isGoogleJunkTriage(triage: TriageResult): boolean {
+  const n = triage.triageNote || "";
+  return n === "GOOGLE_AUTH" || n === "GOOGLE_SITES";
+}
+
+/** 0 = normal sort; 1 = footer current-year bucket; 2 = Google junk (dead bottom). */
+function csvAbsoluteTailBucket(row: { triage: TriageResult; rank: number }): number {
+  if (isGoogleJunkTriage(row.triage)) return 2;
+  if (hasFooterCurrentOrFutureYear(row.triage.enrichment)) return 1;
+  return 0;
 }
 
 function computeLeadSortScore(row: { triage: TriageResult; rank: number }): number {
@@ -235,12 +289,13 @@ function buildNoteByComputer(triage: TriageResult): string {
   if (e.builderDetected) notes.push(`builder=${e.builderDetected}`);
   if (e.agencyCredit && e.agencyCredit !== "no") notes.push(`agencyCredit=${e.agencyCredit}`);
   if (e.pageCountEstimate) notes.push(`pageCount=${e.pageCountEstimate}`);
+  if (e.headerNavPathCount > 0) notes.push(`headerLinks=${e.headerNavPathCount}`);
   notes.push(`captcha=${e.hasCaptcha ? "yes" : "no"}`);
   if (e.enrichStatus) notes.push(`enrich=${e.enrichStatus}`);
   if (hasFooterCurrentOrFutureYear(e)) {
     notes.push("sortBucket=footer_current_year_last");
     if (footerFreshHeuristic(e)) {
-      notes.push("footerYear=guess_dynamic_wp");
+      notes.push("footerYear=guess_recent_home");
     }
   }
 
@@ -280,6 +335,9 @@ function listingProfileTriageNote(normalizedUri: string): string | null {
     return null;
   }
 
+  if (host === "sites.google.com" || hostnameEndsWithDomain(host, "sites.google.com")) {
+    return "GOOGLE_SITES";
+  }
   if (
     hostnameEndsWithDomain(host, "facebook.com") ||
     host === "fb.me" ||
@@ -493,11 +551,26 @@ async function classifyWebsite(
     };
   }
 
-  const enrichKey = hostname || normalizedWebsiteUri;
+  // Full URL: same host can serve different sites (e.g. sites.google.com/… paths).
+  const enrichKey = normalizedWebsiteUri.toLowerCase();
   if (!enrichCache.has(enrichKey)) {
     enrichCache.set(enrichKey, enrichWebsite(normalizedWebsiteUri));
   }
   const enrichment = await enrichCache.get(enrichKey)!;
+
+  const techBits = (enrichment.techSignals || "")
+    .toLowerCase()
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (techBits.includes("google_sign_in_wall")) {
+    return {
+      websiteClass: "facebook",
+      triageNote: "GOOGLE_AUTH",
+      normalizedWebsiteUri,
+      enrichment: null,
+    };
+  }
 
   if (enrichment.hasAgencyCredit) {
     return {
@@ -606,9 +679,9 @@ export async function POST(req: Request) {
     });
 
     triagedRows.sort((a, b) => {
-      const aFresh = hasFooterCurrentOrFutureYear(a.triage.enrichment);
-      const bFresh = hasFooterCurrentOrFutureYear(b.triage.enrichment);
-      if (aFresh !== bFresh) return aFresh ? 1 : -1;
+      const aTail = csvAbsoluteTailBucket(a);
+      const bTail = csvAbsoluteTailBucket(b);
+      if (aTail !== bTail) return aTail - bTail;
 
       const aScore = computeLeadSortScore(a);
       const bScore = computeLeadSortScore(b);
